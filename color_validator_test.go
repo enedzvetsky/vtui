@@ -81,15 +81,78 @@ func TestValidateColors_FlagsHarshSaturatedClash(t *testing.T) {
 // (f4's own default Panel.Text, Norton-Commander/far2l-style) is a
 // comfortable, high-contrast, thoroughly ordinary terminal color choice.
 // Both colors are "saturated" (C*=50 and C*=94) and their hues sit 110°
-// apart, so a flat chroma+hue-delta check flags it — but its 73-point
-// lightness gap means it reads as light text on a dark panel, not a
-// vibrating clash, which is exactly what HarshMaxLightnessDelta exempts.
+// apart, so a flat chroma+hue-delta check flags it — but the background's
+// L*≈18 is well under HarshMinLightness, which is exactly what exempts it:
+// this reads as light text on a dark panel, not two vivid fields clashing.
 func TestValidateColors_AllowsCyanOnNavyPanelText(t *testing.T) {
 	pairs := []ColorPair{
 		{Name: "Panel.Text", FG: 0x00FFFF, BG: 0x0000A0},
 	}
 	if errs := ValidateColors(pairs); len(errs) != 0 {
 		t.Errorf("expected cyan-on-navy panel text to pass, got: %v", errs)
+	}
+}
+
+// TestValidateColors_AllowsRealClassicScheme runs the saturated FG/BG pairs
+// actually shipped in f4's "Classic" style (SetDefaultF4Palette plus
+// internal/theme/styles/classic.ini's overrides) through the harsh-clash
+// check. Classic is f4's original built-in palette — bright accents over a
+// navy panel throughout — and every one of these pairs both clears the
+// chroma+hue-delta gates (so would be flagged without HarshMinLightness)
+// and has a background around L*≈18, comfortably under the 31.5 floor.
+// Panel.Title.Selected is the tightest real-world margin found for that
+// floor: its background L* is ≈31, only ~0.8 under the cutoff.
+//
+// Like TestValidateColors_AllowsRealDefaultScheme, this only exercises the
+// harsh-clash side (MinContrastRatio disabled): Panel.FastFindNoMatch sits a
+// little under 4.5:1 WCAG contrast by design (it is a muted attention color
+// over the panel background, not body text), which is an independent,
+// unrelated, already-correct check that this fix does not touch.
+func TestValidateColors_AllowsRealClassicScheme(t *testing.T) {
+	rules := DefaultColorRules
+	rules.MinContrastRatio = 0
+	pairs := []ColorPair{
+		{Name: "Panel.Text", FG: 0x00FFFF, BG: 0x0000A0},
+		{Name: "Panel.Text.Selected", FG: 0xFFFF00, BG: 0x0000A0},
+		{Name: "Panel.Title.Column", FG: 0xFFFF00, BG: 0x0000A0},
+		{Name: "Panel.Title.Selected", FG: 0x00FFFF, BG: 0x3030C0},
+		{Name: "Panel.Tabs.Accent", FG: 0xFFFF00, BG: 0x0000A0},
+		{Name: "Panel.Tabs.Attention", FG: 0xFF8700, BG: 0x0000A0},
+		{Name: "Panel.FastFindNoMatch", FG: 0xD75F5F, BG: 0x0000A0},
+	}
+	if errs := ValidateColorsWithRules(pairs, rules); len(errs) != 0 {
+		t.Errorf("expected f4's shipped Classic theme to pass the harsh-clash check clean, got: %v", errs)
+	}
+}
+
+// TestValidateColors_FlagsNearIsoluminantSaturatedClash is a second genuine
+// harsh-clash regression, alongside TestValidateColors_FlagsHarshSaturatedClash,
+// found while exercising f4's shipped "Default Dark" theme end-to-end
+// (f4#363): its Menu.Highlight.Selected/HMenu.Highlight.Selected pairs put a
+// saturated red directly on a saturated olive green, both around L*≈50 —
+// genuinely near-isoluminant, unlike every false positive above — and at
+// 1.7:1 WCAG contrast, poor enough that this would fail even with
+// MinContrastRatio enabled. Both HarshMinLightness (neither color is dark)
+// and plain contrast agree this one is a real problem, not a false
+// positive of the chroma/hue check.
+func TestValidateColors_FlagsNearIsoluminantSaturatedClash(t *testing.T) {
+	pairs := []ColorPair{
+		{Name: "Menu.Highlight.Selected", FG: 0xCC0000, BG: 0x4E9A06},
+	}
+	rules := DefaultColorRules
+	rules.MinContrastRatio = 0 // isolate the clash check from the (also failing) contrast one
+	errs := ValidateColorsWithRules(pairs, rules)
+	if len(errs) == 0 {
+		t.Fatal("expected the near-isoluminant red-on-olive pair to be flagged as a harsh clash")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "harsh color clash") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a harsh-color-clash error, got: %v", errs)
 	}
 }
 
@@ -157,39 +220,41 @@ func TestValidateColorsWithRules_ThresholdsAreHonored(t *testing.T) {
 	}
 }
 
-// TestValidateColorsWithRules_LightnessGapExemptsClash spot-checks
-// HarshMaxLightnessDelta directly: the cyan-on-navy pair passes under
-// DefaultColorRules because of its 73-point lightness gap, but flags again
-// once that exemption is disabled (0) or tightened below the gap, and the
-// existing harsh yellow-on-blue clash — whose lightness gap is a narrower
-// 65 points — must keep flagging throughout.
-func TestValidateColorsWithRules_LightnessGapExemptsClash(t *testing.T) {
-	cyanOnNavy := []ColorPair{{Name: "Panel.Text", FG: 0x00FFFF, BG: 0x0000A0}}
+// TestValidateColorsWithRules_MinLightnessExemptsClash spot-checks
+// HarshMinLightness directly, using the tightest real margin found for it:
+// Classic's Panel.Title.Selected (background L*≈31) must pass under
+// DefaultColorRules, and the existing yellow-on-blue clash (darker color
+// L*≈32) must keep flagging, one point higher. Disabling the exemption (0)
+// or raising the floor past that darker color's own L* must flag or exempt
+// each one respectively, showing the field genuinely gates on lightness
+// rather than on anything specific to one color pair.
+func TestValidateColorsWithRules_MinLightnessExemptsClash(t *testing.T) {
+	titleSelected := []ColorPair{{Name: "Panel.Title.Selected", FG: 0x00FFFF, BG: 0x3030C0}}
 	yellowOnBlue := []ColorPair{{Name: "Test.HarshPair", FG: 0xFFFF00, BG: 0x0000FF}}
 
-	if errs := ValidateColorsWithRules(cyanOnNavy, DefaultColorRules); len(errs) != 0 {
-		t.Errorf("cyan-on-navy should pass under DefaultColorRules, got: %v", errs)
+	if errs := ValidateColorsWithRules(titleSelected, DefaultColorRules); len(errs) != 0 {
+		t.Errorf("Panel.Title.Selected should pass under DefaultColorRules, got: %v", errs)
 	}
 	if errs := ValidateColorsWithRules(yellowOnBlue, DefaultColorRules); len(errs) == 0 {
 		t.Error("yellow-on-blue should still be flagged under DefaultColorRules")
 	}
 
-	// Disabling the exemption (0) must flag cyan-on-navy too: it clears the
-	// same chroma and hue-delta gates as the genuine clash, it is only the
-	// lightness gap that tells them apart.
+	// Disabling the exemption (0) must flag Panel.Title.Selected too: it
+	// clears the same chroma and hue-delta gates as the genuine clash, it
+	// is only the lightness floor that tells them apart.
 	rules := DefaultColorRules
-	rules.HarshMaxLightnessDelta = 0
-	if errs := ValidateColorsWithRules(cyanOnNavy, rules); len(errs) == 0 {
-		t.Error("HarshMaxLightnessDelta = 0 should disable the exemption and flag cyan-on-navy")
+	rules.HarshMinLightness = 0
+	if errs := ValidateColorsWithRules(titleSelected, rules); len(errs) == 0 {
+		t.Error("HarshMinLightness = 0 should disable the exemption and flag Panel.Title.Selected")
 	}
 
-	// A cap tighter than the yellow-on-blue clash's own ~65-point gap must
-	// exempt it too, showing the field genuinely gates on the lightness gap
-	// rather than on anything specific to cyan-on-navy.
+	// A floor above yellow-on-blue's own darker color (L*≈32) must exempt
+	// it too, showing the field genuinely gates on lightness rather than on
+	// anything specific to Panel.Title.Selected.
 	rules = DefaultColorRules
-	rules.HarshMaxLightnessDelta = 50
+	rules.HarshMinLightness = 40
 	if errs := ValidateColorsWithRules(yellowOnBlue, rules); len(errs) != 0 {
-		t.Errorf("a 50-point cap should exempt yellow-on-blue (its gap is ~65), got: %v", errs)
+		t.Errorf("a 40-point floor should exempt yellow-on-blue (its darker color is L*≈32), got: %v", errs)
 	}
 }
 
