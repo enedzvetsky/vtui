@@ -310,20 +310,17 @@ jobs:
             tags: ''
             gcflags: ''
             vetflags: ''
-          # Every Win32 pointer this package touches arrives as a uintptr from
-          # a syscall.Proc.Call return or a COM vtable argument -- GlobalLock's
-          # address, the DIB bit buffer, the IDropTarget "this" -- and turning
-          # one back into an unsafe.Pointer is the only way to read it without
-          # cgo. unsafeptr cannot tell those apart from the real bug it looks
-          # for, an unsafe.Pointer built out of an integer that was never an
-          # address, so it flags 33 valid conversions. The rest of vet still
-          # runs on Windows.
+          # unsafeptr runs on both Windows rows too. An address Windows
+          # returns as a uintptr (GlobalLock's view of an HGLOBAL) becomes a
+          # pointer only through winPtr in win32_ptr_windows.go, and COM
+          # callbacks take their arguments typed, so any other
+          # unsafe.Pointer(uintptr) is a finding.
           - label: windows/amd64
             goos: windows
             goarch: amd64
             tags: ''
             gcflags: ''
-            vetflags: -unsafeptr=false
+            vetflags: ''
           - label: linux/arm goffi_static
             goos: linux
             goarch: arm
@@ -353,7 +350,7 @@ jobs:
             goarch: amd64
             tags: -tags=vtui_noebiten,vtui_nogogpu
             gcflags: ''
-            vetflags: -unsafeptr=false
+            vetflags: ''
           - label: freebsd/amd64
             goos: freebsd
             goarch: amd64

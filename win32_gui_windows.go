@@ -154,8 +154,10 @@ type Win32GuiHost struct {
 
 	// dropTarget is the IDropTarget registered for this window, held as the
 	// bare interface pointer so this struct stays free of a type that only
-	// exists on the architectures which implement it.
-	dropTarget uintptr
+	// exists on the architectures which implement it. It is an unsafe.Pointer
+	// rather than a uintptr because it is the address of a Go object, which
+	// must never have to be rebuilt from an integer.
+	dropTarget unsafe.Pointer
 
 	// paintPending is set by Invalidate() and cleared only by a WM_PAINT
 	// that actually put pixels on the screen. BeginPaint() validates the
@@ -1002,7 +1004,9 @@ func (r *Win32GuiRenderer) blitTo(hdc uintptr) (w, h int, ok bool) {
 	if r.memBits == 0 || len(r.bgraBuf) < w*h*4 {
 		return 0, 0, false
 	}
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(r.memBits)), w*h*4)
+	// memBits is the DIB section's pixel buffer, which GDI allocated and
+	// owns until DeleteObject.
+	dst := unsafe.Slice((*byte)(winPtr(r.memBits)), w*h*4)
 	copy(dst, r.bgraBuf[:w*h*4])
 
 	const srcCopyRop = srcCopy
