@@ -4,6 +4,7 @@ package vtui
 
 import (
 	"fmt"
+	"image"
 	"io"
 	"runtime"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/unxed/vtinput"
+	"golang.org/x/image/font"
 	"golang.org/x/sys/windows"
 )
 
@@ -133,19 +135,26 @@ type win32Point struct {
 }
 
 type Win32GuiHost struct {
-	mu                                   sync.Mutex
-	mouseCoalesceMu                      sync.Mutex
-	lastMouseSent                        time.Time
-	pendingMouse                         *vtinput.InputEvent
-	hwnd                                 syscall.Handle
-	hCursor                              syscall.Handle
-	renderer                             *Win32GuiRenderer
-	reader                               *vtinput.Reader
-	scr                                  *ScreenBuf
-	cols, rows                           int
-	cellW, cellH                         int
-	scale                                int
-	winW, winH                           int
+	mu              sync.Mutex
+	mouseCoalesceMu sync.Mutex
+	lastMouseSent   time.Time
+	pendingMouse    *vtinput.InputEvent
+	hwnd            syscall.Handle
+	hCursor         syscall.Handle
+	renderer        *Win32GuiRenderer
+	reader          *vtinput.Reader
+	scr             *ScreenBuf
+	cols, rows      int
+	cellW, cellH    int
+	scale           int
+	winW, winH      int
+	fontName        string
+	fontSize        float64
+	// fontDPI is the font DPI computed once at window creation from the
+	// device's logical DPI (see RunWin32GuiHost); SetFont reuses it so a
+	// font hot-swap keeps the same scaling the window opened with.
+	fontDPI float64
+
 	mouseBtn                             uint32
 	closeChan                            chan struct{}
 	closed                               bool
@@ -254,6 +263,80 @@ func (h *Win32GuiHost) ResizeGrid(cols, rows int) {
 	// resize just like DoDragDrop is posted, so SetWindowPos and the resulting
 	// WM_SIZE are handled by the window's owning thread.
 	procPostMessageW.Call(uintptr(hwnd), wmPerformResize, 0, 0)
+}
+
+// setFace replaces the rasterizer and cell size after a font hot-swap (vtui
+// #136). Unlike the Wayland/X11 renderers, Win32GuiRenderer keeps its own
+// copy of cellW/cellH (set once at construction from the host's), so this
+// also has to update those, or Render would keep composing frames at the
+// old cell size. Takes r.mu itself: the caller (Win32GuiHost.applyFontLocked)
+// holds host.mu, a different lock, and Render/Flush/blitTo take r.mu on
+// their own.
+//
+// Lives here rather than in win32_gui_renderer.go (which has no build tag
+// and is compiled on every platform) because this is its only caller, and
+// that caller is Windows-only: on a lint run done on a non-Windows GOOS,
+// this file -- and therefore the call -- drops out of the build, which
+// made the unused checker flag setFace as dead code when it lived in the
+// build-tag-free file.
+func (r *Win32GuiRenderer) setFace(face font.Face, cellW, cellH int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.face = face
+	r.cellW, r.cellH = cellW, cellH
+	r.glyphCache = make(map[glyphKey]*image.RGBA)
+	r.gfxKnown = false
+}
+
+// applyFontLocked reloads the font face at the host's fontDPI (the value
+// computed once from the device's logical DPI when the window was created;
+// see RunWin32GuiHost) and pushes the new cell size to the renderer and the
+// screen's graphics layer. The caller holds h.mu.
+func (h *Win32GuiHost) applyFontLocked(fontName string, fontSize float64) {
+	dpi := h.fontDPI
+	if dpi <= 0 {
+		dpi = 72.0
+	}
+	face, cellW, cellH := loadBestFont(fontName, fontSize, dpi)
+	h.fontName = fontName
+	h.fontSize = fontSize
+	h.cellW = cellW
+	h.cellH = cellH
+	if h.renderer != nil {
+		h.renderer.setFace(face, cellW, cellH)
+	}
+	if h.scr != nil {
+		h.scr.Graphics().SetCellSize(cellW, cellH)
+	}
+}
+
+// SetFont reloads the font used to draw the grid and asks Windows to resize
+// the window to the new cell size, keeping the grid geometry (cols x rows)
+// unchanged -- the same policy WaylandHost.SetFont and X11Host.SetFont use
+// for their own backends (vtui #136). It never fails: loadBestFont falls
+// back to a built-in bitmap font when fontName cannot be found.
+//
+// Resizing goes through ResizeGrid/wmPerformResize, exactly like an explicit
+// ResizeWindow call: the Win32 window and its message pump live on the
+// locked GUI thread, while FrameManager calls SetFont from its own
+// goroutine, so SetWindowPos has to be posted to, and carried out by, the
+// window's own thread. A same-size font swap does not by itself generate a
+// WM_SIZE (and therefore no repaint), so HardRefresh is called
+// unconditionally to cover that case, the same way the other two hot-swap
+// backends do.
+func (h *Win32GuiHost) SetFont(fontName string, fontSize float64) {
+	if fontSize <= 0 {
+		fontSize = 18.0
+	}
+	h.mu.Lock()
+	h.applyFontLocked(fontName, fontSize)
+	cols, rows := h.cols, h.rows
+	h.mu.Unlock()
+
+	h.ResizeGrid(cols, rows)
+	if FrameManager != nil {
+		FrameManager.HardRefresh()
+	}
 }
 
 // ToggleMaximized maximizes the window, or restores it when it is maximized,
@@ -1092,6 +1175,9 @@ func RunWin32GuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 		scale:     scale,
 		winW:      cols * cellW,
 		winH:      rows * cellH,
+		fontName:  fontName,
+		fontSize:  fontSize,
+		fontDPI:   fontDPI,
 		closeChan: make(chan struct{}),
 	}
 

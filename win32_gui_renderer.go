@@ -36,6 +36,19 @@ func NewWin32GuiRenderer(host *Win32GuiHost, face font.Face, cellW, cellH int) *
 	}
 }
 
+// SetFont changes the font of the already-open window without recreating
+// it: see Win32GuiHost.SetFont. It reports true whenever it has a host to
+// forward to -- Wayland, X11 and Win32 are, as of this part, the GUI
+// backends implementing font hot-swap (vtui #136) -- and false only for a
+// renderer built without one, the same nil guard ToggleMaximized uses.
+func (r *Win32GuiRenderer) SetFont(fontName string, fontSize float64) bool {
+	if r.host == nil {
+		return false
+	}
+	r.host.SetFont(fontName, fontSize)
+	return true
+}
+
 func (r *Win32GuiRenderer) SetWindowTitle(title string) {
 	if r.host != nil {
 		r.host.SetTitle(title)
