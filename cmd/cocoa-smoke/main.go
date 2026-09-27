@@ -299,6 +299,32 @@ func onMain(fn func()) (err error) {
 	}
 }
 
+// onMainAsync runs fn on the main thread without waiting for it. Unlike
+// onMain, this never blocks: a termination request already under way (vtui
+// #1571's applicationShouldTerminate: path, which checkApplicationTerminate
+// exercises directly ahead of closeWindow's defer) can win the race and
+// stop the run loop before this dispatch is drained, and waitUntilDone:true
+// would then hang for onMain's own 10s timeout -- longer than the 5s the
+// "shutdown" check in main allows the driver to return in. If the loop is
+// already gone the dispatch is simply never drained, same as a queued
+// runOnMain call on the real host once loopDone is set.
+func onMainAsync(fn func()) {
+	mainQueue.Lock()
+	mainQueue.fns = append(mainQueue.fns, func() {
+		defer func() { recover() }()
+		pool := class("NSAutoreleasePool").Send(s("new"))
+		defer pool.Send(s("release"))
+		fn()
+	})
+	mainQueue.Unlock()
+
+	runtime.LockOSThread()
+	pool := class("NSAutoreleasePool").Send(s("new"))
+	runner.Send(s("performSelectorOnMainThread:withObject:waitUntilDone:"), s("run:"), objc.ID(0), false)
+	pool.Send(s("release"))
+	runtime.UnlockOSThread()
+}
+
 type point struct{ X, Y float64 }
 type size struct{ Width, Height float64 }
 type rect struct {
@@ -1156,9 +1182,11 @@ func (sm *smoke) closeWindow() {
 		return
 	}
 	sm.logf("info  closing the window with performClose:")
-	if err := onMain(func() { sm.window.Send(s("performClose:"), objc.ID(0)) }); err != nil {
-		sm.check(false, "close", "performClose: %v", err)
-	}
+	// onMainAsync, not onMain: checkApplicationTerminate above may already
+	// have the app quitting by the time this defer runs (that is the point
+	// of it being a safety net), and onMain's waitUntilDone:true would then
+	// wait out its own 10s timeout for a run loop that has already stopped.
+	onMainAsync(func() { sm.window.Send(s("performClose:"), objc.ID(0)) })
 }
 
 // checkAfterShutdown calls the host methods f4's shutdown path calls once
