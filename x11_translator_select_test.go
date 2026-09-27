@@ -3,7 +3,6 @@
 package vtui
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/jezek/xgb"
@@ -11,9 +10,8 @@ import (
 	"github.com/unxed/winkeys"
 )
 
-// fakeX11Translator is a minimal keytrans.Translator stand-in so the
-// selection logic in newX11TranslatorWith can be tested without a real X11
-// connection or keymap.
+// fakeX11Translator is a minimal keytrans.Translator stand-in so
+// newX11Translator can be tested without a real X11 connection or keymap.
 type fakeX11Translator struct {
 	name string
 }
@@ -29,64 +27,44 @@ func (f *fakeX11Translator) UpdateWaylandModifiers(modsDepressed, modsLatched, m
 }
 func (f *fakeX11Translator) Close() {}
 
-func TestNewX11TranslatorWith_PrefersXKBX11WhenItSucceeds(t *testing.T) {
-	want := &fakeX11Translator{name: "xkb-x11"}
-	keytransCalled := false
+func TestNewX11Translator_PassesConnDisplayAndWindowIDToKeytrans(t *testing.T) {
+	want := &fakeX11Translator{name: "xkbgo-x11"}
+	var gotInfo keytrans.OSInfo
 
-	got := newX11TranslatorWith(x11TranslatorFactories{
-		xkbX11: func(conn *xgb.Conn) (keytrans.Translator, error) {
-			return want, nil
-		},
-		keytransFallback: func(info keytrans.OSInfo) keytrans.Translator {
-			keytransCalled = true
-			return &fakeX11Translator{name: "should-not-be-used"}
-		},
-	}, nil, 0)
+	orig := newX11TranslatorFunc
+	defer func() { newX11TranslatorFunc = orig }()
+	newX11TranslatorFunc = func(info keytrans.OSInfo) keytrans.Translator {
+		gotInfo = info
+		return want
+	}
+
+	t.Setenv("DISPLAY", ":42")
+
+	var conn *xgb.Conn
+	got := newX11Translator(conn, 7)
 
 	if got != keytrans.Translator(want) {
-		t.Errorf("expected the xkb-go/x11 translator to be returned, got %v", got)
+		t.Errorf("expected the keytrans translator to be returned, got %v", got)
 	}
-	if keytransCalled {
-		t.Error("keytrans fallback must not be invoked when the xkb-go/x11 path succeeds")
+	if gotInfo.WindowID != 7 {
+		t.Errorf("expected WindowID 7 to be passed through, got %d", gotInfo.WindowID)
+	}
+	if gotInfo.DisplayString != ":42" {
+		t.Errorf("expected DisplayString %q to be passed through, got %q", ":42", gotInfo.DisplayString)
+	}
+	if c, ok := gotInfo.XgbConn.(*xgb.Conn); !ok || c != conn {
+		t.Errorf("expected conn to be passed through as XgbConn, got %#v", gotInfo.XgbConn)
 	}
 }
 
-func TestNewX11TranslatorWith_FallsBackToKeytransOnFailure(t *testing.T) {
-	want := &fakeX11Translator{name: "keytrans-fallback"}
-	var gotDisplay string
-	var gotWindowID uint32
-
-	got := newX11TranslatorWith(x11TranslatorFactories{
-		xkbX11: func(conn *xgb.Conn) (keytrans.Translator, error) {
-			return nil, errors.New("xkb-x11: X server does not support the XKEYBOARD extension")
-		},
-		keytransFallback: func(info keytrans.OSInfo) keytrans.Translator {
-			gotDisplay = info.DisplayString
-			gotWindowID = info.WindowID
-			return want
-		},
-	}, nil, 42)
-
-	if got != keytrans.Translator(want) {
-		t.Errorf("expected the keytrans fallback translator to be returned, got %v", got)
+func TestNewX11Translator_ReturnsNilWhenKeytransFails(t *testing.T) {
+	orig := newX11TranslatorFunc
+	defer func() { newX11TranslatorFunc = orig }()
+	newX11TranslatorFunc = func(info keytrans.OSInfo) keytrans.Translator {
+		return nil
 	}
-	if gotWindowID != 42 {
-		t.Errorf("expected the fallback to receive windowID 42, got %d", gotWindowID)
-	}
-	_ = gotDisplay // set from the environment; not asserted here
-}
 
-func TestNewX11TranslatorWith_FallbackCanAlsoFail(t *testing.T) {
-	got := newX11TranslatorWith(x11TranslatorFactories{
-		xkbX11: func(conn *xgb.Conn) (keytrans.Translator, error) {
-			return nil, errors.New("xkb-x11: no X11 connection")
-		},
-		keytransFallback: func(info keytrans.OSInfo) keytrans.Translator {
-			return nil
-		},
-	}, nil, 0)
-
-	if got != nil {
-		t.Errorf("expected nil when both the xkb-go/x11 path and the keytrans fallback fail, got %v", got)
+	if got := newX11Translator(nil, 0); got != nil {
+		t.Errorf("expected nil when keytrans.NewX11Translator fails, got %v", got)
 	}
 }
