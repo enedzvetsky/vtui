@@ -20,14 +20,19 @@ cannot load anything through it.
 
 ## Leaving backends out
 
-Two build tags drop a backend from the binary entirely, swapping it for the
+Build tags drop a backend from the binary entirely, swapping it for the
 stub the unsupported platforms already get:
 
 - `vtui_noebiten` — the Ebitengine backend (`ebiten_*.go` → `ebiten_stub.go`);
 - `vtui_nogogpu` — the gogpu backend (`gogpu_*.go` → `gogpu_stub.go`,
-  `gogpu_ffi_stub.go`).
+  `gogpu_ffi_stub.go`);
+- `vtui_nococoa` — the Cocoa backend on macOS (`cocoa_gui_darwin.go`,
+  `cocoa_gui_keys_darwin.go` → `cocoa_gui_stub.go`). It brings in no module
+  of its own, purego being there already, so it saves little; what it leaves
+  out is AppKit, and the `init` that pins the main goroutine to the main
+  thread.
 
-Together they leave the X11, Wayland and Win32 backends and remove Ebitengine,
+The first two together leave the X11, Wayland and Win32 backends and remove Ebitengine,
 gogpu, wgpu, naga and gg from the build graph: about 9 MB of a linux/amd64
 binary, which stays linked otherwise even when the program never selects
 those backends, because their packages run `init` code. Asking for a dropped

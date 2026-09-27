@@ -592,9 +592,12 @@ func (sm *smoke) scroll(cell [2]int, lines int32) {
 	sm.view.Send(s("scrollWheel:"), ns)
 }
 
-func (sm *smoke) send(events ...objc.ID) error {
+// send builds events and hands them to the window in one main-thread
+// call. The events are autoreleased, and the pool around each call drains
+// at its end: an event built in one call and sent in the next is gone.
+func (sm *smoke) send(build func() []objc.ID) error {
 	return onMain(func() {
-		for _, ev := range events {
+		for _, ev := range build() {
 			sm.window.Send(s("sendEvent:"), ev)
 		}
 	})
@@ -844,16 +847,9 @@ func (sm *smoke) checkKeys() {
 	}
 	next := sm.probe.eventCount()
 	for _, kc := range cases {
-		var events []objc.ID
-		if err := onMain(func() { events = kc.events() }); err != nil {
-			sm.check(false, kc.name, "building the event: %v", err)
+		if err := sm.send(kc.events); err != nil {
+			sm.check(false, kc.name, "sending: %v", err)
 			continue
-		}
-		if len(events) > 0 {
-			if err := sm.send(events...); err != nil {
-				sm.check(false, kc.name, "sending: %v", err)
-				continue
-			}
 		}
 		var got vtinput.InputEvent
 		var at int
@@ -980,16 +976,9 @@ func (sm *smoke) checkMouse() {
 	}
 	next := sm.probe.eventCount()
 	for _, st := range steps {
-		var events []objc.ID
-		if err := onMain(func() { events = st.events() }); err != nil {
-			sm.check(false, st.name, "building the event: %v", err)
+		if err := sm.send(st.events); err != nil {
+			sm.check(false, st.name, "sending: %v", err)
 			continue
-		}
-		if len(events) > 0 {
-			if err := sm.send(events...); err != nil {
-				sm.check(false, st.name, "sending: %v", err)
-				continue
-			}
 		}
 		var got vtinput.InputEvent
 		var idx int
