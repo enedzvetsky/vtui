@@ -78,16 +78,19 @@ What is left is in vtui, and it is five files rather than one idea:
 
 | File | Missing on Plan 9 |
 | --- | --- |
-| `win32_gui_renderer.go` | `glyphKey`, `drawBoxGlyph` |
+| `gui_grid_raster.go` | `glyphKey`, `drawBoxGlyph` |
 | `crash_report_pid_unix.go` | `syscall.Kill` |
 | `sys_unix.go` | `unix.Dup2` |
 | `terminal_env_unix.go` | `syscall.SIGWINCH` |
 | `gui_api_fallback.go` | `runInX11Window` |
 
-The first row is worth a look on its own account: the Win32 renderer should not
-be compiled anywhere but Windows, and its appearing in a Plan 9 build says its
-constraint is too wide regardless of what Plan 9 does. The others are the usual
-Unix-isms that need a Plan 9 variant or a constraint that excludes it.
+The first row is worth a look on its own account. It is the CPU raster the
+Win32 and Cocoa renderers share, compiled everywhere -- as is each renderer,
+with a stub host where its platform is missing -- so that their tests run on
+every CI runner; a Plan 9 build pulls it in without needing it. It wants the
+constraint of the X11 raster helpers it calls, and the two renderers with it.
+The others are the usual Unix-isms that need a Plan 9 variant or a constraint
+that excludes it.
 
 `gui_api_fallback.go` is the one that is not merely mechanical. Plan 9 has no
 GUI backend at all -- rio is not X11, and vtui has no rio renderer -- so there
@@ -109,3 +112,49 @@ does not select the backend there. The gogpu backend still is.
 lived in `gogpu_host.go`, which is limited to `amd64`/`arm64`, while its caller
 in the Win32 backend is built for every Windows architecture. It now lives in
 `keys_special.go` with no build tag.
+
+## macOS: the Cocoa backend
+
+`--gui=cocoa` (`RunInGUIWindow(..., "cocoa", ...)`) opens an AppKit window
+without cgo and without a GPU: purego registers an `NSView` subclass with the
+Objective-C runtime, the grid is rasterised by `gridRaster` (the Win32
+backend's raster, now shared), and each frame becomes a CoreGraphics image
+set as the view layer's contents. It is built for darwin on amd64 and arm64;
+elsewhere, and with `-tags vtui_nococoa`, `cocoa_gui_stub.go` takes its
+place and asking for it returns an error. It is never chosen automatically:
+an empty backend name keeps looking for `WAYLAND_DISPLAY` and `DISPLAY`.
+
+AppKit belongs to the main thread, so the backend has to be started from the
+main goroutine; `cocoa_gui_darwin.go` locks it to the main thread in `init`,
+as gogpu and Ebitengine do in theirs. FrameManager renders on its own
+goroutine as with every backend, and whatever it needs from the window --
+a display pass, a title, a size -- is handed over with
+`performSelectorOnMainThread:`.
+
+Two properties of the FFI layer (pureffi, over goffi) shape the code:
+
+- Callbacks take no structures on arm64 and return none on any
+  architecture. `NSTextInputClient` passes and returns `NSRange` and
+  `NSRect` by value, so the view does not adopt it. Typed text comes from
+  the keyboard layout through `UCKeyTranslate`, which also combines dead
+  keys; input methods that compose in a window of their own (Chinese,
+  Japanese, Korean) do not work.
+- On arm64, arguments that spill to the stack each take an 8-byte slot,
+  where Apple's ABI packs the small ones. Every call the backend makes fits
+  in registers. `cmd/cocoa-smoke` builds its key events with Quartz event
+  services instead of `+[NSEvent keyEventWithType:...]`, whose `BOOL` and
+  `unsigned short` land on the stack.
+
+Keys follow the gogpu backend on macOS: Command is the left Ctrl channel,
+Control the right one, Option is Alt, and an Option chord carries the key's
+own character, not the one Option composes. Clipboard is goclip's, as for
+every backend. Not done yet: drag and drop, and moving the window to a
+display of another scale -- the font stays rasterised for the display the
+window opened on, and Core Animation scales the frames.
+
+CI runs `cmd/cocoa-smoke` on an arm64 and an Intel macOS runner (the `cocoa`
+job). It drives the window from outside with real `NSEvent`s and checks both
+that each event reached the application and the colours of known cells in
+the frame the backend gave Core Animation; `report.txt`, those frames and
+screenshots of the window are uploaded as the `cocoa-smoke-darwin-*`
+artifacts.
