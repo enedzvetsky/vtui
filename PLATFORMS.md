@@ -18,6 +18,26 @@ Windows) is the one that runs. `gogpuFFIAvailable` reports this at run time as
 well, because a static build (`-tags goffi_static`) compiles the FFI layer but
 cannot load anything through it.
 
+## Leaving backends out
+
+Two build tags drop a backend from the binary entirely, swapping it for the
+stub the unsupported platforms already get:
+
+- `vtui_noebiten` — the Ebitengine backend (`ebiten_*.go` → `ebiten_stub.go`);
+- `vtui_nogogpu` — the gogpu backend (`gogpu_*.go` → `gogpu_stub.go`,
+  `gogpu_ffi_stub.go`).
+
+Together they leave the X11, Wayland and Win32 backends and remove Ebitengine,
+gogpu, wgpu, naga and gg from the build graph: about 9 MB of a linux/amd64
+binary, which stays linked otherwise even when the program never selects
+those backends, because their packages run `init` code. Asking for a dropped
+backend returns an error, and `gogpu` falls back to X11 (Win32 on Windows)
+the same way it does where there is no FFI. f4's lite build uses both.
+`backend_tags_test.go` checks the build graph; CI builds and vets the
+combination on Linux, Windows and macOS.
+
+The FFI layer (goffi) stays: Wayland loads libxkbcommon through it.
+
 ## Known gaps
 
 ### NetBSD, and why the shim is not optional
