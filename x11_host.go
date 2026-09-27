@@ -202,12 +202,7 @@ func NewX11Host(cols, rows, cellW, cellH int) (*X11Host, error) {
 	}
 
 	go func() {
-		info := keytrans.OSInfo{
-			DisplayString: os.Getenv("DISPLAY"),
-			XgbConn:       conn,
-			WindowID:      uint32(host.wid),
-		}
-		translator := keytrans.NewX11Translator(info)
+		translator := newX11Translator(conn, uint32(host.wid))
 		host.mu.Lock()
 		host.translator = translator
 		host.mu.Unlock()
@@ -312,12 +307,7 @@ func (h *X11Host) RunEventLoop() {
 			if h.translator != nil {
 				h.translator.Close()
 			}
-			info := keytrans.OSInfo{
-				DisplayString: os.Getenv("DISPLAY"),
-				XgbConn:       h.conn,
-				WindowID:      uint32(h.wid),
-			}
-			h.translator = keytrans.NewX11Translator(info)
+			h.translator = newX11Translator(h.conn, uint32(h.wid))
 			if h.translator != nil {
 				DebugLog("X11: Keyboard mapping reloaded after MappingNotify (Active backend: %s)", h.translator.Name())
 			}
