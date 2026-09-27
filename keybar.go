@@ -9,12 +9,27 @@ import (
 // KeyBarLabels stores labels for F1-F12 for a specific modifier state.
 type KeyBarLabels [12]string
 
+// KeyBarDisabled marks, per F1-F12 slot, which labels of a KeyBarLabels row
+// belong to a command that is currently unavailable. A disabled slot keeps
+// its label on screen -- unlike an empty one, which the key still has -- but
+// draws it dimmed, the KeyBar counterpart to MenuItem.Disabled.
+type KeyBarDisabled [12]bool
+
 // KeySet represents a full collection of KeyBar labels for all modifier states.
 type KeySet struct {
 	Normal KeyBarLabels
 	Shift  KeyBarLabels
 	Ctrl   KeyBarLabels
 	Alt    KeyBarLabels
+
+	// NormalDisabled, ShiftDisabled, CtrlDisabled and AltDisabled parallel
+	// Normal, Shift, Ctrl and Alt one slot at a time. Left at the zero value
+	// (all false), nothing is dimmed, so a caller that never heard of this
+	// field keeps behaving exactly as before.
+	NormalDisabled KeyBarDisabled
+	ShiftDisabled  KeyBarDisabled
+	CtrlDisabled   KeyBarDisabled
+	AltDisabled    KeyBarDisabled
 }
 
 // KeyBar implements the bottom row of function key hints.
@@ -24,6 +39,15 @@ type KeyBar struct {
 	Shift  KeyBarLabels
 	Ctrl   KeyBarLabels
 	Alt    KeyBarLabels
+
+	// NormalDisabled, ShiftDisabled, CtrlDisabled and AltDisabled are the
+	// KeySet fields of the same name, copied over alongside the labels
+	// (see framemanager.go's KeyBar sync). DisplayObject dims a slot's label
+	// with DimColor when the row currently on screen marks it disabled.
+	NormalDisabled KeyBarDisabled
+	ShiftDisabled  KeyBarDisabled
+	CtrlDisabled   KeyBarDisabled
+	AltDisabled    KeyBarDisabled
 
 	shiftState bool
 	ctrlState  bool
@@ -121,12 +145,16 @@ func (kb *KeyBar) DisplayObject(scr *ScreenBuf) {
 	}
 
 	labels := kb.Normal
+	disabled := kb.NormalDisabled
 	if kb.shiftState {
 		labels = kb.Shift
+		disabled = kb.ShiftDisabled
 	} else if kb.ctrlState {
 		labels = kb.Ctrl
+		disabled = kb.CtrlDisabled
 	} else if kb.altState {
 		labels = kb.Alt
+		disabled = kb.AltDisabled
 	}
 
 	// Double check: if all labels are empty, maybe we shouldn't show anything?
@@ -153,7 +181,11 @@ func (kb *KeyBar) DisplayObject(scr *ScreenBuf) {
 		// 1. Draw number
 		numStr := fmt.Sprintf("%d", i+1)
 		numW := runewidth.StringWidth(numStr)
-		scr.Write(x, kb.Y1, StringToCharInfo(numStr, numAttr))
+		slotNumAttr := numAttr
+		if disabled[i] {
+			slotNumAttr = DimColor(slotNumAttr)
+		}
+		scr.Write(x, kb.Y1, StringToCharInfo(numStr, slotNumAttr))
 
 		// 2. Draw label block (occupies slot minus gap)
 		labelX := x + numW
@@ -170,9 +202,9 @@ func (kb *KeyBar) DisplayObject(scr *ScreenBuf) {
 			if label != "" {
 
 				finalAttr := textAttr
-				// Just a placeholder check: if the KeyBar is used to emit a command,
-				// we should check it. For this generic widget, we'll keep it simple:
-				// if a command is disabled, we dim it.
+				if disabled[i] {
+					finalAttr = DimColor(finalAttr)
+				}
 
 				// Ensure fixed width for the label part by padding it
 				for runewidth.StringWidth(label) < labelW {
