@@ -47,7 +47,7 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 )
 
-replace github.com/ebitengine/purego => github.com/unxed/pureffi v0.1.20
+replace github.com/ebitengine/purego => github.com/unxed/pureffi v0.1.21
 
 replace github.com/go-webgpu/goffi => github.com/unxed/goffi v0.1.9
 
