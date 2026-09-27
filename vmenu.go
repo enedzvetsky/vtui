@@ -741,8 +741,8 @@ func (m *VMenu) DisplayObject(scr *ScreenBuf) {
 			if m.BoxType == SingleBox {
 				symbols := getBoxSymbols(SingleBox)
 				p.DrawLine(m.X1, currY, m.X2, currY, symbols[bsH], colBox, false, false)
-				scr.Write(m.X1, currY, []CharInfo{{Char: uint64(symbols[bsHCrossLeft]), Attributes: colBox}})
-				scr.Write(m.X2, currY, []CharInfo{{Char: uint64(symbols[bsHCrossRight]), Attributes: colBox}})
+				scr.Write(m.X1, currY, []CharInfo{{Char: uint64(symbols[bsHCrossLeft]), Attributes: colBox}})  // #nosec G115 -- box-drawing rune, always small and non-negative
+				scr.Write(m.X2, currY, []CharInfo{{Char: uint64(symbols[bsHCrossRight]), Attributes: colBox}}) // #nosec G115 -- box-drawing rune, always small and non-negative
 			} else {
 				p.DrawLine(m.X1, currY, m.X2, currY, boxSymbols[bsH], colBox, true, true)
 			}
