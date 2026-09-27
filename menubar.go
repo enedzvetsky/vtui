@@ -74,7 +74,7 @@ func (mb *MenuBar) DisplayObject(scr *ScreenBuf) {
 		// Check if ALL subitems are disabled (simplified logic for top-level)
 		allDisabled := len(item.SubItems) > 0
 		for _, si := range item.SubItems {
-			if !si.Separator && !FrameManager.DisabledCommands.IsDisabled(si.Command) {
+			if !si.Separator && !menuItemDisabled(si) {
 				allDisabled = false
 				break
 			}

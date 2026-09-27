@@ -28,6 +28,23 @@ type MenuItem struct {
 	// with SubItems is a heading, so its Command and OnClick are never
 	// used, and it carries the submenu marker where a Shortcut would go.
 	SubItems []MenuItem
+	// Disabled marks the item unavailable in its current context without
+	// hiding it: it still occupies its row, keeps its Shortcut hint, and
+	// stays reachable by keyboard navigation, but is drawn with DimColor and
+	// neither Enter, its hotkey letter nor a mouse click fires OnClick.
+	// This is the per-item counterpart to FrameManager.DisabledCommands,
+	// for menus built from items that carry no TV-style Command id (Command
+	// left at its zero value would otherwise collide across every such item).
+	Disabled bool
+}
+
+// menuItemDisabled reports whether item is unavailable: either the caller
+// marked it Disabled directly, or its Command id is one FrameManager.
+// DisabledCommands currently disables. Both dim and both block activation
+// the same way, so every call site that used to test DisabledCommands alone
+// tests this instead.
+func menuItemDisabled(item MenuItem) bool {
+	return item.Disabled || FrameManager.DisabledCommands.IsDisabled(item.Command)
 }
 
 // VMenu implements a vertical menu with navigation support.
@@ -406,7 +423,7 @@ func (m *VMenu) ProcessKey(e *vtinput.InputEvent) bool {
 				if item.Separator {
 					return true
 				}
-				if FrameManager.DisabledCommands.IsDisabled(item.Command) {
+				if menuItemDisabled(item) {
 					return true
 				}
 
@@ -446,7 +463,7 @@ func (m *VMenu) ProcessKey(e *vtinput.InputEvent) bool {
 			}
 			hk := ExtractHotkey(item.Text)
 			if hk != 0 && (hk == charLower || hk == xlatLower) {
-				if FrameManager.DisabledCommands.IsDisabled(item.Command) {
+				if menuItemDisabled(item) {
 					return true
 				}
 				m.SetSelectPos(i)
@@ -695,7 +712,7 @@ func (m *VMenu) ProcessMouse(e *vtinput.InputEvent) bool {
 			// fire; the click still selects and confirms them.
 			if clickIdx < len(m.Items) {
 				item := m.Items[clickIdx]
-				if FrameManager.DisabledCommands.IsDisabled(item.Command) {
+				if menuItemDisabled(item) {
 					return true
 				}
 
@@ -779,7 +796,7 @@ func (m *VMenu) DisplayObject(scr *ScreenBuf) {
 		}
 
 		item := m.Items[itemIdx]
-		isDisabled := !item.Separator && FrameManager.DisabledCommands.IsDisabled(item.Command)
+		isDisabled := !item.Separator && menuItemDisabled(item)
 
 		attr := colText
 		if isDisabled {
@@ -802,7 +819,7 @@ func (m *VMenu) DisplayObject(scr *ScreenBuf) {
 
 		// Resolve item colors
 		isSel := itemIdx == m.SelectPos
-		isDisabled = FrameManager.DisabledCommands.IsDisabled(item.Command)
+		isDisabled = menuItemDisabled(item)
 
 		itemAttr := colText
 		hiAttr := colHigh
