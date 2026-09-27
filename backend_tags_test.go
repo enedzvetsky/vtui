@@ -20,13 +20,17 @@ var gpuBackendModules = []string{
 	"github.com/go-webgpu/webgpu",
 }
 
-func vtuiDeps(t *testing.T, goos, tags string) []string {
+// noGPUBackendTags is the tag pair f4's lite build passes.
+const noGPUBackendTags = "vtui_noebiten,vtui_nogogpu"
+
+// vtuiDeps lists what this package links for goos/amd64, with or without
+// noGPUBackendTags.
+func vtuiDeps(t *testing.T, goos string, noGPU bool) []string {
 	t.Helper()
-	args := []string{"list", "-deps"}
-	if tags != "" {
-		args = append(args, "-tags", tags)
+	command := exec.Command("go", "list", "-deps", ".")
+	if noGPU {
+		command = exec.Command("go", "list", "-deps", "-tags", noGPUBackendTags, ".")
 	}
-	command := exec.Command("go", append(args, ".")...)
 	command.Env = append(os.Environ(), "GOOS="+goos, "GOARCH=amd64", "CGO_ENABLED=0")
 	out, err := command.Output()
 	if err != nil {
@@ -34,7 +38,7 @@ func vtuiDeps(t *testing.T, goos, tags string) []string {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr = string(exitErr.Stderr)
 		}
-		t.Fatalf("GOOS=%s go %s: %v\n%s", goos, strings.Join(args, " "), err, stderr)
+		t.Fatalf("GOOS=%s %s: %v\n%s", goos, strings.Join(command.Args, " "), err, stderr)
 	}
 	return strings.Fields(string(out))
 }
@@ -56,8 +60,8 @@ func TestNoGPUBackendTagsDropEbitenAndGogpu(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	for _, goos := range []string{"linux", "windows", "darwin"} {
-		if found := gpuBackendDeps(vtuiDeps(t, goos, "vtui_noebiten,vtui_nogogpu")); len(found) > 0 {
-			t.Errorf("GOOS=%s -tags vtui_noebiten,vtui_nogogpu still depends on:\n\t%s", goos, strings.Join(found, "\n\t"))
+		if found := gpuBackendDeps(vtuiDeps(t, goos, true)); len(found) > 0 {
+			t.Errorf("GOOS=%s -tags %s still depends on:\n\t%s", goos, noGPUBackendTags, strings.Join(found, "\n\t"))
 		}
 	}
 }
@@ -68,7 +72,7 @@ func TestDefaultBuildKeepsEbitenAndGogpu(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	deps := strings.Join(vtuiDeps(t, "linux", ""), "\n")
+	deps := strings.Join(vtuiDeps(t, "linux", false), "\n")
 	for _, want := range []string{"github.com/hajimehoshi/ebiten/v2\n", "github.com/gogpu/gogpu\n"} {
 		if !strings.Contains(deps+"\n", want) {
 			t.Errorf("a default linux/amd64 build no longer depends on %s", strings.TrimSpace(want))
