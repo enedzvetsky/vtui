@@ -665,8 +665,11 @@ func (h *X11Host) SetFont(fontName string, fontSize float64) {
 	h.mu.Unlock()
 
 	if conn != nil {
-		width := uint32(cols * cellW)
-		height := uint32(rows * cellH)
+		// #nosec G115 -- cols/rows are the terminal's fixed grid size and
+		// cellW/cellH are font-metric pixel sizes from loadBestFont; both
+		// pairs are always small non-negative values, so neither product
+		// approaches uint32's range.
+		width, height := uint32(cols*cellW), uint32(rows*cellH)
 		xproto.ConfigureWindow(conn, wid, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight, []uint32{width, height})
 	}
 	if FrameManager != nil {
