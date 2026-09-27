@@ -645,6 +645,40 @@ func rgb(c uint32) (r, g, b byte) {
 	return byte((c >> 16) & 0xFF), byte((c >> 8) & 0xFF), byte(c & 0xFF)
 }
 
+// Lock suspends frame delivery: Flush keeps composing (or, while locked,
+// skips composing altogether -- see composeFrame) but nothing reaches the
+// Renderer until the matching Unlock call drops the counter back to zero.
+//
+// This is the render lock from f4#254: X11/Wayland reported tearing and
+// half-drawn intermediate frames while rapidly toggling panels (holding
+// Ctrl+O). Bracket a large multi-step redraw -- one that paints an entire
+// panel across many separate Write/FillRect calls -- with Lock/Unlock so no
+// caller of Flush observes, and no backend presents, a partially composed
+// frame. Calls nest: Unlock only re-enables delivery once every matching
+// Lock has been undone, so a redraw that starts while another is still
+// locked is safely deferred rather than racing it for the display.
+func (s *ScreenBuf) Lock() {
+	s.mu.Lock()
+	s.lockCount++
+	s.mu.Unlock()
+}
+
+// Unlock reverses one Lock call. Once every matching Lock has been undone
+// (the counter reaches zero) it flushes immediately, delivering whatever
+// frame is now fully composed instead of waiting for some unrelated later
+// Flush call to notice.
+func (s *ScreenBuf) Unlock() {
+	s.mu.Lock()
+	if s.lockCount > 0 {
+		s.lockCount--
+	}
+	unlocked := s.lockCount == 0
+	s.mu.Unlock()
+	if unlocked {
+		s.Flush()
+	}
+}
+
 // Flush синхронизирует состояние виртуального буфера с физическим экраном через Renderer.
 //
 // The frame is composed while holding mu and delivered after releasing it.
@@ -669,6 +703,11 @@ func (s *ScreenBuf) Flush() {
 // the result, or nil when there is nothing to deliver (or when the renderer
 // writes on its own, as the GUI backends do). Everything it touches is
 // protected by mu; the returned closure touches none of it.
+//
+// While lockCount is positive (see Lock/Unlock) this returns nil without
+// touching the Renderer at all: the pending state keeps accumulating in buf,
+// and the first Flush after the matching Unlock composes and delivers it in
+// one step.
 func (s *ScreenBuf) composeFrame() func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -868,7 +907,16 @@ func (r *AnsiRenderer) SetPalette(pal *[256]uint32) {
 
 // isGhostProneText reports Unicode that can shift width through font
 // fallback; box/block runes are fixed single-column cells that never shift.
+// A SymCharFlag token is judged by the classic rune it expands to, so a
+// checkbox/radio cell is exactly as ghost-prone as the literal character it
+// used to hold.
 func isGhostProneText(ch uint64) bool {
+	if IsSymChar(ch) {
+		// #nosec G115 -- CellBaseRune returns one of the fixed classic runes a
+		// symbol token expands to (e.g. '[', 'x', '('), always a small
+		// non-negative code point; widening to uint64 is lossless.
+		return isGhostProneText(uint64(CellBaseRune(ch)))
+	}
 	if ch < 0x80 {
 		return false
 	}
@@ -894,6 +942,12 @@ func cellAdvanceTrusted(ch uint64, wide bool) bool {
 		return true
 	case wide:
 		return false
+	case IsSymChar(ch):
+		// Judge a checkbox/radio token by the classic rune it expands to,
+		// exactly as if the literal character were still stored here.
+		// #nosec G115 -- see isGhostProneText: always a small non-negative
+		// classic code point.
+		return cellAdvanceTrusted(uint64(CellBaseRune(ch)), false)
 	case ch < 0x80:
 		return true
 	case ch >= 0x2500 && ch <= 0x259F:
@@ -1026,7 +1080,7 @@ func (r *AnsiRenderer) Render(buf, shadow []CharInfo, w, h int, force bool) {
 			} else if IsFreeBSDSyscons {
 				// Every byte is a cell there: see syscons_text.go.
 				sysconsCell(&r.frameOut, char, x+1 < w && buf[idx+1].Char == WideCharFiller)
-			} else if IsCompChar(char) {
+			} else if IsCompChar(char) || IsSymChar(char) {
 				r.frameOut.WriteString(CellString(char))
 			} else {
 				r.frameOut.WriteRune(rune(char))
@@ -1238,7 +1292,7 @@ func ScreenRow(scr *ScreenBuf, y, x1, x2 int) string {
 		}
 		if cell.Char == 0 {
 			sb.WriteByte(' ')
-		} else if IsCompChar(cell.Char) {
+		} else if IsCompChar(cell.Char) || IsSymChar(cell.Char) {
 			sb.WriteString(CellString(cell.Char))
 		} else {
 			sb.WriteRune(rune(cell.Char))

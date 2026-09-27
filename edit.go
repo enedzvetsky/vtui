@@ -53,6 +53,13 @@ type Edit struct {
 	PathHintsEnabled  bool
 	mouseSelecting    bool
 	mouseSelectAnchor int
+	// historyClickArmed and historyMouseMoved let a plain (non-drag) click
+	// anywhere in a ShowHistoryButton field open the history drop-down, like
+	// a DropdownOnly ComboBox already does for its whole field. A click that
+	// turns into a drag still selects text instead, same as ComboBox's
+	// editable path (f4 #1392).
+	historyClickArmed bool
+	historyMouseMoved bool
 }
 
 // HistoryProvider is an interface for external history persistence (e.g. from f4).
@@ -1066,17 +1073,16 @@ func (e *Edit) OpenHistory() {
 	menu.SetPosition(e.X1, y, e.X1+w-1, y+h-1)
 
 	menu.SetOwner(e)
+	// Picking an entry only puts it into the field, as far2l's
+	// Dialog::SelectFromEditHistory does; confirming stays with the user
+	// (f4 #1331). The pick used to queue an Enter behind it, which the dialog
+	// took for its default button: F7 created the folder the moment a name
+	// was picked from its history.
 	menu.OnAction = func(idx int) {
 		e.SetText(e.History[idx])
 		e.SetFocus(true)
 		e.clearFlag = false
 		e.HistoryPos = -1
-		// Auto-execute on mouse selection (matches Far behavior)
-		if FrameManager != nil {
-			FrameManager.InjectEvents([]*vtinput.InputEvent{
-				{Type: vtinput.KeyEventType, KeyDown: true, VirtualKeyCode: vtinput.VK_RETURN},
-			})
-		}
 	}
 
 	menu.OnKeyDown = func(ev *vtinput.InputEvent) bool {
@@ -1097,22 +1103,17 @@ func (e *Edit) OpenHistory() {
 			return true
 		}
 
-		// Handle Enter (Execute) vs Shift+Enter (Insert only)
+		// Enter, with or without Shift, puts the entry into the field and
+		// closes the list, nothing more: see OnAction above (f4 #1331).
 		if ev.VirtualKeyCode == vtinput.VK_RETURN {
 			if len(menu.Items) == 0 {
 				return true
 			}
-			shift := (ev.ControlKeyState & vtinput.ShiftPressed) != 0
 			idx := menu.SelectPos
 			e.SetText(e.History[idx])
 			e.SetFocus(true)
 			e.clearFlag = false
 			menu.Close()
-
-			if !shift {
-				// Inject a real Enter event so the parent frame handles execution
-				FrameManager.InjectEvents([]*vtinput.InputEvent{ev})
-			}
 			return true
 		}
 		return false
@@ -1246,9 +1247,18 @@ func (e *Edit) ProcessMouse(ev *vtinput.InputEvent) bool {
 	if e.mouseSelecting {
 		if IsMouseRelease(ev) {
 			e.mouseSelecting = false
+			openHistory := e.historyClickArmed && !e.historyMouseMoved
+			e.historyClickArmed = false
+			e.historyMouseMoved = false
+			if openHistory {
+				e.OpenHistory()
+			}
 			return true
 		}
 		if ev.ButtonState&vtinput.FromLeft1stButtonPressed != 0 {
+			if ev.MouseEventFlags&vtinput.MouseMoved != 0 {
+				e.historyMouseMoved = true
+			}
 			e.curPos = e.cursorPositionAtX(int(ev.MouseX))
 			e.selAnchor = e.mouseSelectAnchor
 			if e.curPos < e.selAnchor {
@@ -1282,6 +1292,11 @@ func (e *Edit) ProcessMouse(ev *vtinput.InputEvent) bool {
 				e.clearFlag = false
 				e.mouseSelecting = true
 				e.mouseSelectAnchor = e.curPos
+				// A history field's whole area opens the drop-down on a
+				// plain click, same as a DropdownOnly ComboBox's field; a
+				// click that turns into a drag selects text instead.
+				e.historyClickArmed = e.ShowHistoryButton
+				e.historyMouseMoved = false
 				return true
 			}
 		}
