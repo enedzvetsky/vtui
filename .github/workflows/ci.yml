@@ -252,6 +252,23 @@ jobs:
             goarch: ppc64le
             tags: -tags=noffi
             gcflags: ''
+          # f4's lite build keeps only the X11, Wayland and Win32 backends:
+          # vtui_noebiten and vtui_nogogpu swap the other two for their stubs.
+          - label: linux/amd64 vtui_noebiten,vtui_nogogpu
+            goos: linux
+            goarch: amd64
+            tags: -tags=vtui_noebiten,vtui_nogogpu
+            gcflags: ''
+          - label: windows/amd64 vtui_noebiten,vtui_nogogpu
+            goos: windows
+            goarch: amd64
+            tags: -tags=vtui_noebiten,vtui_nogogpu
+            gcflags: ''
+          - label: darwin/arm64 vtui_noebiten,vtui_nogogpu
+            goos: darwin
+            goarch: arm64
+            tags: -tags=vtui_noebiten,vtui_nogogpu
+            gcflags: ''
           - label: linux/amd64 goffi_musl
             goos: linux
             goarch: amd64
@@ -325,6 +342,18 @@ jobs:
             tags: ''
             gcflags: ''
             vetflags: ''
+          - label: linux/amd64 vtui_noebiten,vtui_nogogpu
+            goos: linux
+            goarch: amd64
+            tags: -tags=vtui_noebiten,vtui_nogogpu
+            gcflags: ''
+            vetflags: ''
+          - label: windows/amd64 vtui_noebiten,vtui_nogogpu
+            goos: windows
+            goarch: amd64
+            tags: -tags=vtui_noebiten,vtui_nogogpu
+            gcflags: ''
+            vetflags: -unsafeptr=false
           - label: freebsd/amd64
             goos: freebsd
             goarch: amd64
