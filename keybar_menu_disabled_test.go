@@ -73,8 +73,8 @@ func TestVMenu_ItemDisabled_BlocksActivation(t *testing.T) {
 		Type:        vtinput.MouseEventType,
 		KeyDown:     true,
 		ButtonState: vtinput.FromLeft1stButtonPressed,
-		MouseX:      int16(m.X1 + 2),
-		MouseY:      int16(y),
+		MouseX:      int16(m.X1 + 2), //nolint:gosec // test-fixed small coordinate
+		MouseY:      int16(y),        //nolint:gosec // test-fixed small coordinate
 	})
 	if clicked {
 		t.Error("mouse click on a disabled item must not fire OnClick")
