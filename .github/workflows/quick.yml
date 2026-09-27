@@ -1,0 +1,40 @@
+name: quick
+
+# Cheap per-push check for lunobot/** branches (own work branches and
+# lunobot/staging): one linux job instead of ci.yml's 40+ checks. The full
+# matrix runs once per train PR (LUNOBOT.md § 7.2 in unxed/lunobot).
+on:
+  push:
+    branches:
+      - 'lunobot/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+# lunobot/staging is one linear branch every bot lands on, often faster than a
+# run takes. Cancelling there would starve it: no run would ever finish. With
+# cancel-in-progress off, GitHub keeps the running check and replaces only the
+# queued one, so every run completes and the next always tests the newest tip,
+# which contains every commit in between. A green run on any descendant of a
+# commit covers that commit. Other branches keep cancelling superseded runs.
+concurrency:
+  group: quick-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/lunobot/staging' }}
+
+jobs:
+  check:
+    name: Build and test (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - run: go vet ./...
+
+      - run: go test -count=1 -timeout 4m ./...

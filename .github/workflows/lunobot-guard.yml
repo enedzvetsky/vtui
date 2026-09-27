@@ -1,0 +1,25 @@
+name: lunobot-guard
+
+# Bots never open their own pull requests for routine work: it lands in
+# lunobot/staging and reaches main in trains (LUNOBOT.md § 7.2 in
+# unxed/lunobot). Only lunobot/train/* and lunobot/urgent/* may be PR heads;
+# any other lunobot/* PR fails here at once, so the drift shows up red.
+on:
+  pull_request:
+
+jobs:
+  route:
+    name: Lunobot PR route
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only trains and urgent fixes open bot pull requests
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            lunobot/train/*|lunobot/urgent/*) echo "ok: $HEAD_REF" ;;
+            lunobot/*)
+              echo "::error::$HEAD_REF: routine bot work lands in lunobot/staging via train.py land, not in its own PR (LUNOBOT.md § 7.2)"
+              exit 1 ;;
+            *) echo "not a bot branch: $HEAD_REF" ;;
+          esac
