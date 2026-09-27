@@ -113,6 +113,12 @@ gomobile/cgo path (`dipToNativePixels` and `graphicsDriverCreatorImpl` come out
 undefined). That is an Ebitengine limitation, reported upstream; vtui simply
 does not select the backend there. The gogpu backend still is.
 
+`freebsd/amd64` and `freebsd/arm64` now select the gogpu backend. The FFI
+layer already had an implementation for FreeBSD (see above); `gogpu_stub.go`,
+`gogpu_ffi_stub.go` and the real `gogpu_*.go` files just had not caught up and
+kept routing FreeBSD to the stub. Falls back to X11 wherever the FFI layer
+does not load at run time, same as everywhere else.
+
 `windows/386` used to fail with `undefined: isSpecialOrModifiedKey`: the helper
 lived in `gogpu_host.go`, which is limited to `amd64`/`arm64`, while its caller
 in the Win32 backend is built for every Windows architecture. It now lives in
