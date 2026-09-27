@@ -477,3 +477,67 @@ func TestWaylandRendererClearsMarginsFilledByALargerFrame(t *testing.T) {
 		t.Errorf("the smaller frame was not drawn: %#x", got)
 	}
 }
+
+// SetFont reloads the font and pushes the new cell size to the renderer and
+// the screen's graphics layer, without touching the grid geometry -- the
+// window resize (through the widget, which is absent in this unit test) is
+// the only thing that follows the cell size, not cols/rows (vtui #136).
+func TestWaylandHost_SetFont(t *testing.T) {
+	scr := NewSilentScreenBuf()
+	scr.AllocBuf(10, 5)
+
+	host := &WaylandHost{
+		cols:     10,
+		rows:     5,
+		cellW:    1,
+		cellH:    1,
+		scale:    1,
+		fontName: "old-font",
+		fontSize: 12,
+		screen:   scr,
+	}
+	renderer := NewWaylandRenderer(host, nil)
+	renderer.glyphCache[glyphKey{}] = &image.RGBA{}
+	renderer.gfxKnown = true
+	host.renderer = renderer
+
+	_, wantCellW, wantCellH := loadBestFont("NonExistentFontAtAll", 20, 72.0)
+
+	if renderer.face != nil {
+		t.Fatal("setup: renderer already has a face before SetFont")
+	}
+	host.SetFont("NonExistentFontAtAll", 20)
+
+	if host.fontName != "NonExistentFontAtAll" || host.fontSize != 20 {
+		t.Fatalf("fontName/fontSize = %q/%v, want NonExistentFontAtAll/20", host.fontName, host.fontSize)
+	}
+	if host.cellW != wantCellW || host.cellH != wantCellH {
+		t.Fatalf("host cell size = %dx%d, want %dx%d", host.cellW, host.cellH, wantCellW, wantCellH)
+	}
+	if cw, ch := scr.Graphics().CellSize(); cw != wantCellW || ch != wantCellH {
+		t.Fatalf("screen cell size = %dx%d, want %dx%d", cw, ch, wantCellW, wantCellH)
+	}
+	if renderer.face == nil {
+		t.Error("renderer face was not set")
+	}
+	if len(renderer.glyphCache) != 0 {
+		t.Errorf("glyphCache not cleared: %d entries left", len(renderer.glyphCache))
+	}
+	if renderer.gfxKnown {
+		t.Error("gfxKnown not reset after font change")
+	}
+	if host.cols != 10 || host.rows != 5 {
+		t.Fatalf("grid = %dx%d, want unchanged 10x5", host.cols, host.rows)
+	}
+}
+
+// A widget-less host (no native window yet, as in the test above) must not
+// panic when SetFont is called -- mirrors the "testable before a native
+// window exists" contract Win32GuiHost.ResizeGrid documents.
+func TestWaylandHost_SetFontWithoutWidget(t *testing.T) {
+	host := &WaylandHost{scale: 1, fontName: "old-font", fontSize: 12}
+	host.SetFont("NonExistentFontAtAll", 20)
+	if host.fontName != "NonExistentFontAtAll" {
+		t.Errorf("fontName = %q, want NonExistentFontAtAll", host.fontName)
+	}
+}

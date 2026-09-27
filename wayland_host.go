@@ -313,8 +313,18 @@ func (h *WaylandHost) updateScaleLocked(scale float64) bool {
 	if scale <= 0 || math.Abs(h.scale-scale) < 0.001 {
 		return false
 	}
-	face, cellW, cellH := loadBestFont(h.fontName, h.fontSize, 72.0*float64(scale))
 	h.scale = scale
+	h.applyFontLocked(h.fontName, h.fontSize)
+	return true
+}
+
+// applyFontLocked reloads the font face at the dpi implied by the current
+// output scale, and pushes the new cell size to the renderer and the
+// screen's graphics layer. The caller holds h.mu.
+func (h *WaylandHost) applyFontLocked(fontName string, fontSize float64) {
+	face, cellW, cellH := loadBestFont(fontName, fontSize, 72.0*h.scale)
+	h.fontName = fontName
+	h.fontSize = fontSize
 	h.cellW = cellW
 	h.cellH = cellH
 	if h.renderer != nil {
@@ -323,7 +333,35 @@ func (h *WaylandHost) updateScaleLocked(scale float64) bool {
 	if h.screen != nil {
 		h.screen.Graphics().SetCellSize(cellW, cellH)
 	}
-	return true
+}
+
+// SetFont reloads the font used to draw the grid and asks the compositor to
+// resize the window to the new cell size, keeping the grid geometry (cols x
+// rows) unchanged -- the same policy already used by updateScaleLocked when
+// the Wayland output scale changes. It never fails: loadBestFont falls back
+// to a built-in bitmap font when fontName cannot be found.
+//
+// The resize request alone does not repaint: the compositor only sends a
+// fresh configure (which drives the repaint in Resize) when the pixel size
+// actually changes, so a same-size font swap would otherwise leave the old
+// glyphs on screen. HardRefresh is called unconditionally to cover that
+// case.
+func (h *WaylandHost) SetFont(fontName string, fontSize float64) {
+	if fontSize <= 0 {
+		fontSize = 18.0
+	}
+	h.mu.Lock()
+	h.applyFontLocked(fontName, fontSize)
+	widget := h.widget
+	cols, rows, scale, cellW, cellH := h.cols, h.rows, h.scale, h.cellW, h.cellH
+	h.mu.Unlock()
+
+	if widget != nil {
+		widget.ScheduleResize(logicalWaylandPixels(cols*cellW, scale), logicalWaylandPixels(rows*cellH, scale))
+	}
+	if FrameManager != nil {
+		FrameManager.HardRefresh()
+	}
 }
 
 func (h *WaylandHost) Redraw(widget *window.Widget) {

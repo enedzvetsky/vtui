@@ -2312,6 +2312,41 @@ func (fm *frameManager) ResizeWindow(cols, rows int) {
 	}
 }
 
+// fontSetter is implemented by renderers that can hot-swap the font of an
+// already-open native window: reload the face, recompute the cell size and
+// repaint, without recreating the window. Not every GUI backend supports
+// this yet (vtui #136); a renderer that does not implement it leaves the
+// setting exactly where it is, and the caller (as of writing, f4's "Шрифт"
+// settings group) treats the change as needing a restart.
+type fontSetter interface {
+	// SetFont reports whether it applied the change.
+	SetFont(fontName string, fontSize float64) bool
+}
+
+// SetFont changes the font of an already-open GUI window, without
+// recreating it, when the active backend supports live font changes. It
+// reports false when the backend does not (yet) support this, in which case
+// the caller should fall back to whatever it does today -- typically
+// telling the user the change needs a restart.
+func (fm *frameManager) SetFont(fontName string, fontSize float64) bool {
+	if fm.scr == nil || fm.scr.Renderer == nil {
+		return false
+	}
+	if r, ok := fm.scr.Renderer.(fontSetter); ok {
+		return r.SetFont(fontName, fontSize)
+	}
+	return false
+}
+
+// SetFont changes the font of the active GUI window; see
+// frameManager.SetFont.
+func SetFont(fontName string, fontSize float64) bool {
+	if FrameManager != nil {
+		return FrameManager.SetFont(fontName, fontSize)
+	}
+	return false
+}
+
 // windowMaximizer is implemented by renderers that draw into a native window
 // the platform can maximize.
 type windowMaximizer interface {
