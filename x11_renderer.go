@@ -56,6 +56,23 @@ func NewX11Renderer(host *X11Host, face font.Face) *X11Renderer {
 func (r *X11Renderer) SetPalette(pal *[256]uint32) {
 }
 
+// setFace replaces the rasterizer after a font hot-swap (vtui #136). The
+// caller holds host.mu, which also protects rendering.
+func (r *X11Renderer) setFace(face font.Face) {
+	r.face = face
+	r.glyphCache = make(map[glyphKey]*image.RGBA)
+	r.gfxKnown = false
+}
+
+// SetFont changes the font of the already-open window without recreating
+// it: see X11Host.SetFont. It always reports true, since Wayland and X11
+// are, as of this part, the GUI backends implementing font hot-swap (vtui
+// #136).
+func (r *X11Renderer) SetFont(fontName string, fontSize float64) bool {
+	r.host.SetFont(fontName, fontSize)
+	return true
+}
+
 func (r *X11Renderer) ResizeWindow(cols, rows int) {
 	r.host.mu.Lock()
 	conn := r.host.conn

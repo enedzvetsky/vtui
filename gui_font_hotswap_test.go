@@ -39,8 +39,8 @@ func TestFrameManagerSetFont_UsesRenderer(t *testing.T) {
 }
 
 // A backend whose renderer cannot hot-swap the font (every GUI backend
-// besides Wayland, as of this part of #136) must report false, not panic or
-// silently pretend to have applied the change.
+// besides Wayland and X11, as of this part of #136) must report false, not
+// panic or silently pretend to have applied the change.
 func TestFrameManagerSetFont_UnsupportedRenderer(t *testing.T) {
 	scr := NewSilentScreenBuf()
 	scr.AllocBuf(10, 5)
