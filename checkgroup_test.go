@@ -144,7 +144,7 @@ func TestCheckGroup_ProcessMouse_ClickTogglesItemAndMovesFocus(t *testing.T) {
 	x := cg.X1 + cg.colWidths[0]
 	handled := cg.ProcessMouse(&vtinput.InputEvent{
 		ButtonState: vtinput.FromLeft1stButtonPressed, KeyDown: true,
-		MouseX: int16(x), MouseY: int16(cg.Y1),
+		MouseX: int16(x), MouseY: int16(cg.Y1), // #nosec G115 -- test-fixture coordinates, always well within int16
 	})
 	if !handled {
 		t.Fatal("click on item 1 should be handled")
@@ -159,7 +159,7 @@ func TestCheckGroup_ProcessMouse_ClickTogglesItemAndMovesFocus(t *testing.T) {
 	// A click that only presses without KeyDown (button release) must not toggle.
 	handled = cg.ProcessMouse(&vtinput.InputEvent{
 		ButtonState: vtinput.FromLeft1stButtonPressed, KeyDown: false,
-		MouseX: int16(x), MouseY: int16(cg.Y1),
+		MouseX: int16(x), MouseY: int16(cg.Y1), // #nosec G115 -- test-fixture coordinates, always well within int16
 	})
 	if handled {
 		t.Error("button-up event should not be handled")
