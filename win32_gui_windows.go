@@ -4,6 +4,7 @@ package vtui
 
 import (
 	"fmt"
+	"image"
 	"io"
 	"runtime"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/unxed/vtinput"
+	"golang.org/x/image/font"
 	"golang.org/x/sys/windows"
 )
 
@@ -261,6 +263,29 @@ func (h *Win32GuiHost) ResizeGrid(cols, rows int) {
 	// resize just like DoDragDrop is posted, so SetWindowPos and the resulting
 	// WM_SIZE are handled by the window's owning thread.
 	procPostMessageW.Call(uintptr(hwnd), wmPerformResize, 0, 0)
+}
+
+// setFace replaces the rasterizer and cell size after a font hot-swap (vtui
+// #136). Unlike the Wayland/X11 renderers, Win32GuiRenderer keeps its own
+// copy of cellW/cellH (set once at construction from the host's), so this
+// also has to update those, or Render would keep composing frames at the
+// old cell size. Takes r.mu itself: the caller (Win32GuiHost.applyFontLocked)
+// holds host.mu, a different lock, and Render/Flush/blitTo take r.mu on
+// their own.
+//
+// Lives here rather than in win32_gui_renderer.go (which has no build tag
+// and is compiled on every platform) because this is its only caller, and
+// that caller is Windows-only: on a lint run done on a non-Windows GOOS,
+// this file -- and therefore the call -- drops out of the build, which
+// made the unused checker flag setFace as dead code when it lived in the
+// build-tag-free file.
+func (r *Win32GuiRenderer) setFace(face font.Face, cellW, cellH int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.face = face
+	r.cellW, r.cellH = cellW, cellH
+	r.glyphCache = make(map[glyphKey]*image.RGBA)
+	r.gfxKnown = false
 }
 
 // applyFontLocked reloads the font face at the host's fontDPI (the value

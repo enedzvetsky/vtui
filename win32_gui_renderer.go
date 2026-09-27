@@ -1,8 +1,6 @@
 package vtui
 
 import (
-	"image"
-
 	"golang.org/x/image/font"
 )
 
@@ -36,21 +34,6 @@ func NewWin32GuiRenderer(host *Win32GuiHost, face font.Face, cellW, cellH int) *
 		gridRaster: newGridRaster(face, cellW, cellH, scale),
 		host:       host,
 	}
-}
-
-// setFace replaces the rasterizer and cell size after a font hot-swap (vtui
-// #136). Unlike the Wayland/X11 renderers, Win32GuiRenderer keeps its own
-// copy of cellW/cellH (set once at construction from the host's), so this
-// also has to update those, or Render would keep composing frames at the
-// old cell size. Takes r.mu itself: the caller (Win32GuiHost.SetFont) holds
-// host.mu, a different lock, and Render/Flush/blitTo take r.mu on their own.
-func (r *Win32GuiRenderer) setFace(face font.Face, cellW, cellH int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.face = face
-	r.cellW, r.cellH = cellW, cellH
-	r.glyphCache = make(map[glyphKey]*image.RGBA)
-	r.gfxKnown = false
 }
 
 // SetFont changes the font of the already-open window without recreating
