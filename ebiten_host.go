@@ -234,6 +234,52 @@ func (h *EbitenHost) requestSize(w, h2 int) {
 	h.mu.Unlock()
 }
 
+// SetFont reloads the font used to draw the grid and asks Ebitengine to
+// resize the window to the new cell size, keeping the grid geometry (cols x
+// rows) unchanged -- the same policy the other GUI backends' SetFont use
+// for their own windows (vtui #136). It never fails: loadBestFont falls
+// back to a built-in bitmap font when fontName cannot be found, the same
+// fallback RunEbitenHost applies at startup.
+//
+// The size is measured at the display scale the window was opened with
+// (see RunEbitenHost), the same scale requestSize's caller, Update,
+// converts back out of when it calls ebiten.SetWindowSize.
+//
+// requestSize alone does not repaint: a same-size font swap keeps the
+// window's pixel size unchanged, so Layout sees no grid change and nothing
+// else drives a redraw. FrameManager.HardRefresh is therefore called
+// unconditionally to cover that case, the same way the other backends'
+// SetFont do.
+func (h *EbitenHost) SetFont(fontName string, fontSize float64) {
+	h.mu.Lock()
+	scale := h.scale
+	h.mu.Unlock()
+	if scale < 1 {
+		scale = 1
+	}
+
+	face, cellW, cellH := loadBestFont(fontName, fontSize*float64(scale), 72)
+	if cellW <= 0 || cellH <= 0 {
+		cellW, cellH = 7*scale, 13*scale
+	}
+
+	h.mu.Lock()
+	h.cellW, h.cellH = cellW, cellH
+	cols, rows := h.cols, h.rows
+	h.mu.Unlock()
+
+	if h.renderer != nil {
+		h.renderer.setFace(face, cellW, cellH)
+	}
+	if h.scr != nil {
+		h.scr.Graphics().SetCellSize(cellW, cellH)
+	}
+	h.requestSize(cols*cellW, rows*cellH)
+	if FrameManager != nil {
+		FrameManager.HardRefresh()
+	}
+}
+
 // ebitenGame is the ebiten.Game implementation. Update translates input,
 // Draw uploads whatever the renderer has rasterised.
 type ebitenGame struct {
