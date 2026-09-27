@@ -851,8 +851,8 @@ func (m *VMenu) drawSeparator(p *Painter, scr *ScreenBuf, y int, colBox uint64) 
 	if m.BoxType == SingleBox {
 		symbols := getBoxSymbols(SingleBox)
 		p.DrawLine(m.X1, y, m.X2, y, symbols[bsH], colBox, false, false)
-		scr.Write(m.X1, y, []CharInfo{{Char: uint64(symbols[bsHCrossLeft]), Attributes: colBox}})
-		scr.Write(m.X2, y, []CharInfo{{Char: uint64(symbols[bsHCrossRight]), Attributes: colBox}})
+		scr.Write(m.X1, y, []CharInfo{{Char: uint64(symbols[bsHCrossLeft]), Attributes: colBox}})  // #nosec G115 -- box-drawing rune, always small and non-negative
+		scr.Write(m.X2, y, []CharInfo{{Char: uint64(symbols[bsHCrossRight]), Attributes: colBox}}) // #nosec G115 -- box-drawing rune, always small and non-negative
 	} else {
 		p.DrawLine(m.X1, y, m.X2, y, boxSymbols[bsH], colBox, true, true)
 	}
