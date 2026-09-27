@@ -97,6 +97,14 @@ func (r *WaylandRenderer) ResizeWindow(cols, rows int) {
 	}
 }
 
+// SetFont changes the font of the already-open window without recreating
+// it: see WaylandHost.SetFont. It always reports true, since Wayland is
+// currently the only backend implementing GUI font hot-swap (vtui #136).
+func (r *WaylandRenderer) SetFont(fontName string, fontSize float64) bool {
+	r.host.SetFont(fontName, fontSize)
+	return true
+}
+
 // ToggleMaximized asks the compositor to maximize the window, or to restore
 // it when it is maximized (xdg_toplevel set_maximized / unset_maximized).
 // The toolkit tracks the state from the compositor's configure events on the
