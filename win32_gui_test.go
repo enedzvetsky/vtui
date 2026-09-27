@@ -138,6 +138,18 @@ func TestFrameManager_GetBackendName_Win32Gui(t *testing.T) {
 	}
 }
 
+// A renderer built without a host (as several tests above do, e.g.
+// TestWin32GuiRenderer_Lifecycle) has nothing to forward a font change to;
+// SetFont must report that rather than dereference a nil host (vtui #136).
+// The real hot-swap, which needs the host's Windows-only fields, is covered
+// by TestWin32GuiRenderer_SetFont in win32_gui_font_windows_test.go.
+func TestWin32GuiRenderer_SetFont_NilHost(t *testing.T) {
+	r := NewWin32GuiRenderer(nil, nil, 8, 16)
+	if r.SetFont("Comic Sans", 14) {
+		t.Error("SetFont = true for a renderer with no host")
+	}
+}
+
 func TestWin32Gui_PostQuitState(t *testing.T) {
 	host := &Win32GuiHost{
 		closeChan: make(chan struct{}),
