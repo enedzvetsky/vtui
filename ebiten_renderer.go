@@ -372,6 +372,33 @@ func (r *EbitenRenderer) SetCursor(x, y int, visible bool, shape CursorShape) {
 // renderer holding a second copy that could drift out of date.
 func (r *EbitenRenderer) SetPalette(pal *[256]uint32) {}
 
+// setFace installs a newly loaded face and cell size, dropping the
+// glyph cache keyed by the old font (see drawCachedGlyph) and the
+// graphics-layer generation stamp; Render's own pixW/pixH check (the cell
+// size changing means the framebuffer's size does too) takes care of
+// forcing the actual repaint. The caller is EbitenHost.SetFont (vtui #136).
+func (r *EbitenRenderer) setFace(face font.Face, cellW, cellH int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.face = face
+	r.cellW, r.cellH = cellW, cellH
+	r.glyphCache = make(map[glyphKey]*image.RGBA)
+	r.gfxKnown = false
+}
+
+// SetFont changes the font of the already-open window without recreating
+// it: see EbitenHost.SetFont. It always reports true when there is a host
+// to forward to -- gogpu and ebiten are, as of this part, the GUI backends
+// implementing font hot-swap (vtui #136) -- and false only for a renderer
+// built without one.
+func (r *EbitenRenderer) SetFont(fontName string, fontSize float64) bool {
+	if r.host == nil {
+		return false
+	}
+	r.host.SetFont(fontName, fontSize)
+	return true
+}
+
 func (r *EbitenRenderer) SetWindowTitle(title string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -98,6 +98,36 @@ func (r *GogpuRenderer) SetFallbackFontChain(chain *fontFallbackChain) {
 	r.glyphMemo = nil
 }
 
+// setFace installs a newly loaded primary face, fallback chain and cell
+// size, dropping every glyph-shape cache keyed by the old font (faceFor's
+// faceCache, glyphRectsCached's glyphMemo) and the graphics-layer generation
+// stamp, so the next frame re-walks both from scratch instead of serving
+// stale entries for the new font. The caller is GogpuHost.SetFont (vtui
+// #136).
+func (r *GogpuRenderer) setFace(face text.Face, chain *fontFallbackChain, cellW, cellH int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.face = face
+	r.chain = chain
+	r.cellW, r.cellH = cellW, cellH
+	r.faceCache = nil
+	r.glyphMemo = nil
+	r.gfxKnown = false
+}
+
+// SetFont changes the font of the already-open window without recreating
+// it: see GogpuHost.SetFont. It always reports true when there is a host to
+// forward to -- gogpu and ebiten are, as of this part, the GUI backends
+// implementing font hot-swap (vtui #136) -- and false only for a renderer
+// built without one.
+func (r *GogpuRenderer) SetFont(fontName string, fontSize float64) bool {
+	if r.host == nil {
+		return false
+	}
+	r.host.SetFont(fontName, fontSize)
+	return true
+}
+
 // faceFor resolves the face owning a glyph for ch, memoised per rune: a cmap
 // probe once per distinct rune on screen, not per cell per frame, keeps this
 // off the hot path. The caller must hold r.mu (DrawToScreen, the only caller,

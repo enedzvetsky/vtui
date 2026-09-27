@@ -383,6 +383,42 @@ func (h *GogpuHost) handleFocus(focused bool) {
 	h.sendEvent(&vtinput.InputEvent{Type: vtinput.FocusEventType, SetFocus: focused})
 }
 
+// SetFont reloads the font used to draw the grid and asks gogpu to resize
+// the window to the new cell size, keeping the grid geometry (cols x rows)
+// unchanged -- the same policy the other GUI backends' SetFont use for
+// their own windows (vtui #136). It never fails: loadGogpuFont falls back
+// to a built-in cell size when fontName cannot be found.
+//
+// RequestSize alone does not repaint: a same-size font swap keeps the
+// window's pixel size unchanged, so no OnDraw size-change event follows to
+// drive a redraw. FrameManager.HardRefresh is therefore called
+// unconditionally to cover that case, the same way the other backends'
+// SetFont do.
+func (h *GogpuHost) SetFont(fontName string, fontSize float64) {
+	face, chain, cellW, cellH := loadGogpuFont(fontName, fontSize)
+
+	h.mu.Lock()
+	h.face = face
+	h.cellW = cellW
+	h.cellH = cellH
+	app := h.app
+	cols, rows := h.cols, h.rows
+	h.mu.Unlock()
+
+	if scr := h.scr; scr != nil {
+		if r, ok := scr.Renderer.(*GogpuRenderer); ok {
+			r.setFace(face, chain, cellW, cellH)
+		}
+		scr.Graphics().SetCellSize(cellW, cellH)
+	}
+	if app != nil {
+		app.RequestSize(cols*cellW, rows*cellH)
+	}
+	if FrameManager != nil {
+		FrameManager.HardRefresh()
+	}
+}
+
 func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp func()) error {
 	// DX12: use naga DXIL backend instead of HLSL->FXC
 	// to avoid 2-6s shader compilation via d3dcompiler_47.dll
