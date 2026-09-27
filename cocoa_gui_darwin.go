@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,8 @@ const (
 	nsViewLayerContentsRedrawOnSetNeedsDsp = 1
 	nsViewLayerContentsPlacementTopLeft    = 11
 	nsTerminateCancel                      = 0
+	nsTerminateNow                         = 1
+	nsTerminateLater                       = 2
 	nsUTF8StringEncoding                   = 4
 
 	nsEventTypeKeyDown            = 10
@@ -109,7 +112,8 @@ var cocoaSel struct {
 	center, makeKeyAndOrderFront, orderOut   objc.SEL
 	setContentSize, setContentMinSize        objc.SEL
 	setContentResizeIncrements, zoom, close  objc.SEL
-	setFrameTopLeftPoint, setBackgroundColor objc.SEL
+	setFrame, setFrameTopLeftPoint           objc.SEL
+	setBackgroundColor                       objc.SEL
 	blackColor, respondsToSelector           objc.SEL
 	setTabbingMode                           objc.SEL
 	convertRectFromScreen, window            objc.SEL
@@ -130,6 +134,8 @@ var cocoaSel struct {
 	separatorItem, setSubmenu                objc.SEL
 	hide, terminate, performKeyEquivalent    objc.SEL
 	runQueued                                objc.SEL
+	replyToApplicationShouldTerminate        objc.SEL
+	vtuiReplyTerminate                       objc.SEL
 }
 
 // Plain C functions: Core Graphics for the frame, libobjc for autorelease
@@ -150,10 +156,15 @@ var (
 
 // cocoaHosts maps the view and the window delegate to the host they belong
 // to; cocoaActiveHost is the host of the running loop, for the application
-// delegate, which belongs to no window.
+// delegate, which belongs to no window. cocoaAppDelegate is NSApp's
+// delegate, set once in RunCocoaGuiHost's setup and read from any thread
+// after that (see cocoaAppDelegate's use in cocoaReplyOnceClosed): the `go`
+// statement that starts a goroutine after that point happens-after the
+// assignment, so this needs no lock.
 var (
-	cocoaHosts      sync.Map
-	cocoaActiveHost atomic.Pointer[CocoaGuiHost]
+	cocoaHosts       sync.Map
+	cocoaActiveHost  atomic.Pointer[CocoaGuiHost]
+	cocoaAppDelegate objc.ID
 )
 
 func cocoaHostFor(id objc.ID) *CocoaGuiHost {
@@ -242,6 +253,7 @@ func loadCocoaOnce() error {
 		{&s.setContentMinSize, "setContentMinSize:"},
 		{&s.setContentResizeIncrements, "setContentResizeIncrements:"},
 		{&s.zoom, "zoom:"}, {&s.close, "close"},
+		{&s.setFrame, "setFrame:display:"},
 		{&s.setFrameTopLeftPoint, "setFrameTopLeftPoint:"},
 		{&s.setBackgroundColor, "setBackgroundColor:"},
 		{&s.blackColor, "blackColor"},
@@ -276,6 +288,8 @@ func loadCocoaOnce() error {
 		{&s.hide, "hide:"}, {&s.terminate, "terminate:"},
 		{&s.performKeyEquivalent, "performKeyEquivalent:"},
 		{&s.runQueued, "vtuiRunQueued:"},
+		{&s.replyToApplicationShouldTerminate, "replyToApplicationShouldTerminate:"},
+		{&s.vtuiReplyTerminate, "vtuiReplyTerminate:"},
 	} {
 		*sel.dst = objc.RegisterName(sel.name)
 	}
@@ -484,15 +498,31 @@ func registerCocoaClasses() error {
 	cocoaRT.classApplicationDelegate, err = objc.RegisterClass("VtuiCocoaApplicationDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("applicationShouldTerminate:"), Fn: func(objc.ID, objc.SEL, objc.ID) uint {
 			defer cocoaCallbackRecover("applicationShouldTerminate:")
-			// Quit from the menu, or a logout. Never let AppKit call exit()
-			// under the application: ask it to quit as the close button
-			// does, or end the loop if it has already gone.
-			if h := cocoaActiveHost.Load(); h != nil && !h.isClosed() && !FrameManager.IsShutdown() {
-				postQuitCommand()
-			} else {
-				cocoaStopApp()
+			// Quit from the menu, or a logout, restart or shutdown. Never let
+			// AppKit call exit() under the application: ask it to quit as the
+			// close button does, or end the loop if it has already gone.
+			// AppKit is told to wait rather than refused outright (returning
+			// NSTerminateCancel here would otherwise refuse every logout,
+			// restart and shutdown for good); cocoaReplyOnceClosed answers it
+			// once that quit has actually finished.
+			h := cocoaActiveHost.Load()
+			if h == nil {
+				// Nothing is open: there is nothing left to shut down, so
+				// there is nothing to wait for either.
+				return nsTerminateNow
 			}
-			return nsTerminateCancel
+			if h.isClosed() || FrameManager.IsShutdown() {
+				cocoaStopApp()
+			} else {
+				postQuitCommand()
+			}
+			go cocoaReplyOnceClosed(h)
+			return nsTerminateLater
+		}},
+		{Cmd: cocoaSel.vtuiReplyTerminate, Fn: func(objc.ID, objc.SEL, objc.ID) {
+			defer cocoaCallbackRecover("vtuiReplyTerminate:")
+			app := objc.ID(cocoaRT.classNSApplication).Send(cocoaSel.sharedApplication)
+			app.Send(cocoaSel.replyToApplicationShouldTerminate, true)
 		}},
 		{Cmd: objc.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), Fn: func(objc.ID, objc.SEL, objc.ID) bool {
 			return false
@@ -572,6 +602,24 @@ func cocoaStopApp() {
 	}
 }
 
+// cocoaReplyOnceClosed waits for h's own quit sequence -- the one the close
+// button and Cmd+Q trigger -- to reach the end of close(), and then answers
+// applicationShouldTerminate:'s NSTerminateLater so a logout, restart or
+// shutdown that was waiting on it can proceed. AppKit will not act on the
+// reply until this arrives, so a wedged close() would otherwise hang the
+// logout instead of merely refusing it; the timeout answers anyway rather
+// than letting that happen.
+func cocoaReplyOnceClosed(h *CocoaGuiHost) {
+	select {
+	case <-h.hostClosed:
+	case <-time.After(10 * time.Second):
+		DebugLog("COCOA: close() did not finish within 10s of a termination request; replying anyway")
+	}
+	if cocoaAppDelegate != 0 {
+		cocoaPerformOnMain(cocoaAppDelegate, cocoaSel.vtuiReplyTerminate, false)
+	}
+}
+
 // cocoaPrimaryScreenTop is the top edge of the main display in AppKit's
 // screen coordinates, which grow upwards from its bottom edge.
 func cocoaPrimaryScreenTop() float64 {
@@ -604,12 +652,19 @@ type CocoaGuiHost struct {
 
 	app, window, view, windowDelegate objc.ID
 
-	// mainQueue holds work for the main thread; see runOnMain.
+	// mainMu guards window, view and windowDelegate above, not just
+	// mainQueue and loopDone: close() zeroes all three under it once the
+	// loop has ended, so runOnMain's gate also keeps every other method from
+	// reading them once they are stale (vtui #1571).
 	mainMu    sync.Mutex
 	mainQueue []func()
 	loopDone  bool
 	// displayQueued keeps at most one display request in flight.
 	displayQueued atomic.Bool
+	// hostClosed is closed once close() has finished releasing the window,
+	// for applicationShouldTerminate: to wait on before it may tell AppKit a
+	// pending logout, restart or shutdown can proceed.
+	hostClosed chan struct{}
 
 	// mainOnly
 	bitmap         uintptr
@@ -631,9 +686,20 @@ func (h *CocoaGuiHost) isClosed() bool {
 
 // runOnMain runs fn on the main thread: at once when called there, else
 // queued for the main loop. Work queued after the loop has ended is
-// dropped; there is no window left for it to act on.
+// dropped; there is no window left for it to act on. This includes the
+// caller already being on the main thread: f4's deferred SaveSession, and
+// anything else called from the same goroutine that ran RunInGUIWindow,
+// keeps running there once RunInGUIWindow has returned, which is exactly
+// when window, view and windowDelegate have already been released (vtui
+// #1571) -- so that path needs the same loopDone check as the queued one.
 func (h *CocoaGuiHost) runOnMain(fn func()) {
 	if cocoaOnMainThread() {
+		h.mainMu.Lock()
+		done := h.loopDone
+		h.mainMu.Unlock()
+		if done {
+			return
+		}
 		fn()
 		return
 	}
@@ -649,9 +715,16 @@ func (h *CocoaGuiHost) runOnMain(fn func()) {
 }
 
 // runOnMainAndWait is runOnMain for work whose result the caller needs. It
-// reports whether fn ran.
+// reports whether fn ran; see runOnMain for why the already-on-the-main-
+// thread path has to check loopDone too (vtui #1571).
 func (h *CocoaGuiHost) runOnMainAndWait(fn func()) bool {
 	if cocoaOnMainThread() {
+		h.mainMu.Lock()
+		done := h.loopDone
+		h.mainMu.Unlock()
+		if done {
+			return false
+		}
 		fn()
 		return true
 	}
@@ -710,7 +783,14 @@ func (h *CocoaGuiHost) SetTitle(title string) {
 		if h.window == 0 {
 			return
 		}
-		s := cocoaNSString(full)
+		// A directory name off SMB/NFS/FUSE, or an OSC title set from a
+		// terminal session, is not guaranteed to be valid UTF-8;
+		// initWithUTF8String: returns nil for one that is not, and nil is
+		// not a title -setTitle: can take (vtui #1571).
+		s := cocoaNSString(strings.ToValidUTF8(full, "\uFFFD"))
+		if s == 0 {
+			return
+		}
 		h.window.Send(cocoaSel.setTitle, s)
 		s.Send(cocoaSel.release)
 	})
@@ -719,29 +799,53 @@ func (h *CocoaGuiHost) SetTitle(title string) {
 // ResizeGrid resizes the window to hold cols x rows cells. The new grid
 // size reaches FrameManager the way a resize by hand does, through
 // windowDidResize:.
+//
+// setContentSize: alone keeps the bottom-left corner of the window fixed,
+// which would grow the window upward on screen; X11 and Win32 keep the top
+// edge fixed instead, so the frame is recomputed by hand here to match
+// (vtui #1571).
 func (h *CocoaGuiHost) ResizeGrid(cols, rows int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
 	h.runOnMain(func() {
-		if h.window == 0 {
+		if h.window == 0 || h.view == 0 {
 			return
 		}
-		h.window.Send(cocoaSel.setContentSize, cocoaSize{
-			Width:  float64(cols*h.cellW) / h.pointScale,
-			Height: float64(rows*h.cellH) / h.pointScale,
-		})
+		oldFrame := objc.Send[cocoaRect](h.window, cocoaSel.frame)
+		oldContent := objc.Send[cocoaRect](h.view, cocoaSel.bounds).Size
+		// The chrome (title bar, border) around the content view keeps its
+		// own size; only the content grows or shrinks.
+		chromeW := oldFrame.Size.Width - oldContent.Width
+		chromeH := oldFrame.Size.Height - oldContent.Height
+		newSize := cocoaSize{
+			Width:  float64(cols*h.cellW)/h.pointScale + chromeW,
+			Height: float64(rows*h.cellH)/h.pointScale + chromeH,
+		}
+		newFrame := cocoaRect{
+			Origin: cocoaPoint{
+				X: oldFrame.Origin.X,
+				Y: oldFrame.Origin.Y + oldFrame.Size.Height - newSize.Height,
+			},
+			Size: newSize,
+		}
+		h.window.Send(cocoaSel.setFrame, newFrame, true)
 	})
 }
 
 // ToggleMaximized zooms the window: to the largest size the screen allows,
 // or back to the size it had before.
 func (h *CocoaGuiHost) ToggleMaximized() bool {
-	if h.window == 0 {
+	h.mainMu.Lock()
+	done, window := h.loopDone, h.window
+	h.mainMu.Unlock()
+	if done || window == 0 {
 		return false
 	}
 	h.runOnMain(func() {
-		h.window.Send(cocoaSel.zoom, objc.ID(0))
+		if h.window != 0 {
+			h.window.Send(cocoaSel.zoom, objc.ID(0))
+		}
 	})
 	return true
 }
@@ -1208,6 +1312,10 @@ func RunCocoaGuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 	if app.Send(cocoaSel.delegate) == 0 {
 		app.Send(cocoaSel.setDelegate, objc.ID(cocoaRT.classApplicationDelegate).Send(cocoaSel.alloc).Send(cocoaSel.init))
 	}
+	// Kept for cocoaReplyOnceClosed, which runs on its own goroutine and
+	// otherwise has no way to reach the delegate without messaging AppKit
+	// from off the main thread (vtui #1571).
+	cocoaAppDelegate = app.Send(cocoaSel.delegate)
 
 	if fontSize <= 0 {
 		fontSize = 18.0
@@ -1235,6 +1343,7 @@ func RunCocoaGuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 		scale:      scale,
 		pointScale: pointScale,
 		app:        app,
+		hostClosed: make(chan struct{}),
 	}
 
 	cellPt := cocoaSize{Width: float64(cellW) / pointScale, Height: float64(cellH) / pointScale}
@@ -1254,9 +1363,14 @@ func RunCocoaGuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 	// A resize by hand moves in whole cells, as in a terminal window.
 	window.Send(cocoaSel.setContentResizeIncrements, cellPt)
 	window.Send(cocoaSel.setContentMinSize, cocoaSize{Width: 10 * cellPt.Width, Height: 4 * cellPt.Height})
-	title := cocoaNSString(WindowTitleWithBackend(AppName))
-	window.Send(cocoaSel.setTitle, title)
-	title.Send(cocoaSel.release)
+	// AppName is compiled in and always valid UTF-8, but going through the
+	// same ToValidUTF8 guard as SetTitle keeps this call safe too, and keeps
+	// the two in one place if that ever changes (vtui #1571).
+	title := cocoaNSString(strings.ToValidUTF8(WindowTitleWithBackend(AppName), "\uFFFD"))
+	if title != 0 {
+		window.Send(cocoaSel.setTitle, title)
+		title.Send(cocoaSel.release)
+	}
 
 	view := objc.ID(cocoaRT.classView).Send(cocoaSel.alloc).Send(cocoaSel.initWithFrame, content)
 	view.Send(cocoaSel.setWantsLayer, true)
@@ -1351,32 +1465,42 @@ func RunCocoaGuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 }
 
 // close tears the window down once the loop has ended.
+//
+// window, view and windowDelegate are zeroed here, under mainMu, rather than
+// merely released: every host method reads them under the same lock (or
+// through runOnMain/runOnMainAndWait, which gate on loopDone under it), so a
+// call made after RunInGUIWindow has returned -- f4's deferred SaveSession,
+// among others -- sees them gone instead of dereferencing the objects this
+// releases (vtui #1571).
 func (h *CocoaGuiHost) close() {
 	h.mainMu.Lock()
 	h.loopDone = true
 	h.mainQueue = nil
+	window, view, windowDelegate := h.window, h.view, h.windowDelegate
+	h.window, h.view, h.windowDelegate = 0, 0, 0
 	h.mainMu.Unlock()
 
-	cocoaHosts.Delete(h.view)
-	cocoaHosts.Delete(h.windowDelegate)
+	cocoaHosts.Delete(view)
+	cocoaHosts.Delete(windowDelegate)
 	cocoaActiveHost.CompareAndSwap(h, nil)
 
-	if h.window != 0 {
-		h.window.Send(cocoaSel.setDelegate, objc.ID(0))
-		h.window.Send(cocoaSel.orderOut, objc.ID(0))
-		h.window.Send(cocoaSel.close)
-		h.window.Send(cocoaSel.release)
+	if window != 0 {
+		window.Send(cocoaSel.setDelegate, objc.ID(0))
+		window.Send(cocoaSel.orderOut, objc.ID(0))
+		window.Send(cocoaSel.close)
+		window.Send(cocoaSel.release)
 	}
-	if h.view != 0 {
-		h.view.Send(cocoaSel.release)
+	if view != 0 {
+		view.Send(cocoaSel.release)
 	}
-	if h.windowDelegate != 0 {
-		h.windowDelegate.Send(cocoaSel.release)
+	if windowDelegate != 0 {
+		windowDelegate.Send(cocoaSel.release)
 	}
 	if h.bitmap != 0 {
 		cgContextRelease(h.bitmap)
 		h.bitmap = 0
 	}
+	close(h.hostClosed)
 }
 
 func runInCocoaWindow(cols, rows int, fontName string, fontSize float64, setupApp func()) error {

@@ -26,6 +26,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,12 +37,22 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 	"github.com/unxed/vtinput"
 	"github.com/unxed/vtui"
+)
+
+// NSApplicationTerminateReply, from AppKit -- not exported by vtui, so
+// redeclared here to check applicationShouldTerminate:'s return value
+// (vtui #1571: it must not always answer NSTerminateCancel, which would
+// refuse every logout, restart and shutdown outright).
+const (
+	nsTerminateCancel = 0
+	nsTerminateLater  = 2
 )
 
 // The known screen. Cells are given as (column, row).
@@ -685,8 +696,24 @@ func (sm *smoke) run() {
 	sm.savePNG("frame-03-after-click.png", img)
 	sm.screenshot("after-input")
 
-	// 5. Resize.
+	// 5. Resize by hand: the window edge is dragged, and updateGridSize
+	// recomputes the grid from it.
 	sm.checkResize()
+
+	// 6. Resize the other way: the application asks for a grid size and
+	// ResizeGrid picks the window size for it (vtui #1571's ResizeGrid fix
+	// -- the window used to grow upward instead of downward).
+	sm.checkResizeGrid()
+
+	// 7. A title that is not valid UTF-8 must not be dropped or crash the
+	// window (vtui #1571's SetTitle fix).
+	sm.checkInvalidUTF8Title()
+
+	// 8. A logout, restart or shutdown must not be refused outright (vtui
+	// #1571's applicationShouldTerminate: fix). This starts the real quit,
+	// so it runs last; closeWindow below becomes a harmless no-op once the
+	// window is already on its way down.
+	sm.checkApplicationTerminate()
 }
 
 func cocoaString(str objc.ID) string {
@@ -1028,8 +1055,101 @@ func (sm *smoke) checkResize() {
 	sm.screenshot("resized")
 }
 
+// checkResizeGrid drives host.ResizeGrid the way FrameManager.ResizeWindow
+// does when the application itself asks for a different grid size --
+// unlike checkResize, which simulates the user dragging the window's edge
+// by hand -- and checks that the window's top edge stays put. The old bug
+// kept the bottom-left corner fixed instead, so the window grew upward on
+// screen rather than downward, as X11 and Win32 do (vtui #1571).
+func (sm *smoke) checkResizeGrid() {
+	scr := vtui.FrameManager.Screen()
+	cols, rows := scr.Width()+6, scr.Height()+3
+	var before, after rect
+	if err := onMain(func() { before = objc.Send[rect](sm.window, s("frame")) }); err != nil {
+		sm.check(false, "resize-grid frame before", "%v", err)
+		return
+	}
+
+	vtui.FrameManager.ResizeWindow(cols, rows)
+
+	var last [2]int
+	sm.check(waitFor(5*time.Second, func() bool {
+		var ok bool
+		last, ok = sm.probe.lastResize()
+		return ok && last == [2]int{cols, rows}
+	}), "resize-grid reached the app", "ResizeConsole(%d, %d), want (%d, %d)", last[0], last[1], cols, rows)
+
+	if err := onMain(func() { after = objc.Send[rect](sm.window, s("frame")) }); err != nil {
+		sm.check(false, "resize-grid frame after", "%v", err)
+		return
+	}
+	sm.check(after.Size.Width > before.Size.Width && after.Size.Height > before.Size.Height, "resize-grid grew",
+		"window frame %+v grew to %+v for a %dx%d grid", before, after, cols, rows)
+
+	beforeTop := before.Origin.Y + before.Size.Height
+	afterTop := after.Origin.Y + after.Size.Height
+	sm.check(math.Abs(afterTop-beforeTop) < 1, "resize-grid top edge",
+		"top edge stayed at %.1f (was %.1f): ResizeGrid grows the window downward, not upward", afterTop, beforeTop)
+
+	img, ok := sm.waitCellColor("resize-grid frame", [2]int{cols - 1, rows - 1}, colCorner, 5*time.Second)
+	if ok {
+		c, _ := sm.cellCenter(img, redCell)
+		sm.check(rgbOf(c) == colRed, "resize-grid content", "cell %v shows %06X (want %06X)", redCell, rgbOf(c), colRed)
+	}
+	sm.savePNG("frame-05-resize-grid.png", img)
+}
+
+// checkInvalidUTF8Title sets a title that is not valid UTF-8, the way an
+// OSC title from a terminal session or a non-UTF-8 directory name off
+// SMB/NFS/FUSE can be, and checks that the window still gets a readable
+// title instead of AppKit's nonnull setTitle: receiving nil (vtui #1571).
+func (sm *smoke) checkInvalidUTF8Title() {
+	vtui.FrameManager.PostTask(func() { vtui.SetWindowTitle("bad\xff\xfeutf8") })
+	var title string
+	ok := waitFor(5*time.Second, func() bool {
+		_ = onMain(func() { title = cocoaString(sm.window.Send(s("title"))) })
+		return strings.Contains(title, "utf8")
+	})
+	sm.check(ok && utf8.ValidString(title) && strings.Contains(title, "bad") && strings.Contains(title, "utf8"),
+		"invalid UTF-8 title", "window title after an invalid-UTF-8 SetWindowTitle is %q (valid UTF-8, not dropped)", title)
+}
+
+// checkApplicationTerminate sends applicationShouldTerminate: to NSApp's
+// delegate directly, the way -terminate: (Cmd+Q, or a logout, restart or
+// shutdown) does, and checks two things: that it answers NSTerminateLater
+// rather than refusing outright (vtui #1571 -- an outright refusal would
+// block every logout, restart and shutdown for good), and that the
+// application still quits normally afterward, i.e. that the later reply
+// this triggers is not left hanging. It also exercises the app quitting by
+// a path other than the close button, ahead of the after-shutdown checks in
+// main.
+func (sm *smoke) checkApplicationTerminate() {
+	var delegate objc.ID
+	var reply uint
+	if err := onMain(func() {
+		delegate = class("NSApplication").Send(s("sharedApplication")).Send(s("delegate"))
+		if delegate != 0 {
+			reply = objc.Send[uint](delegate, s("applicationShouldTerminate:"), objc.ID(0))
+		}
+	}); err != nil {
+		sm.check(false, "terminate reply", "applicationShouldTerminate: %v", err)
+		return
+	}
+	if !sm.check(delegate != 0, "terminate delegate", "NSApp has an application delegate") {
+		return
+	}
+	sm.check(reply == nsTerminateLater && reply != nsTerminateCancel, "terminate reply",
+		"applicationShouldTerminate: returned %d, want NSTerminateLater (%d), not an immediate NSTerminateCancel (%d)",
+		reply, nsTerminateLater, nsTerminateCancel)
+}
+
 // closeWindow closes the window as its close button does. The
-// application quits in answer, and RunInGUIWindow returns.
+// application quits in answer, and RunInGUIWindow returns. It is also the
+// driver's safety net on a panic, and a harmless no-op if the window is
+// already on its way down by the time it runs (checkApplicationTerminate
+// already started that): performClose: on a closing window, or
+// windowShouldClose: seeing the quit that is already under way, just does
+// nothing further.
 func (sm *smoke) closeWindow() {
 	if sm.window == 0 {
 		vtui.FrameManager.PostTask(func() { vtui.FrameManager.EmitCommand(vtui.CmQuit, nil) })
@@ -1039,6 +1159,33 @@ func (sm *smoke) closeWindow() {
 	if err := onMain(func() { sm.window.Send(s("performClose:"), objc.ID(0)) }); err != nil {
 		sm.check(false, "close", "performClose: %v", err)
 	}
+}
+
+// checkAfterShutdown calls the host methods f4's shutdown path calls once
+// RunGui/RunInGUIWindow has returned -- the deferred SaveSession's
+// GetWindowPosition and SetWindowPosition among them -- plus SetWindowTitle,
+// ResizeWindow, ToggleWindowMaximized and a Flush, which take the same
+// route. The window, view and delegate are already released by then; before
+// vtui #1571 was fixed, close() left them non-zero and the "already on the
+// main thread" shortcut in runOnMain/runOnMainAndWait skipped the loopDone
+// check that would otherwise have caught it, so these went to freed AppKit
+// objects instead of quietly doing nothing.
+func (sm *smoke) checkAfterShutdown() {
+	defer func() {
+		if r := recover(); r != nil {
+			sm.check(false, "after-shutdown calls", "panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	vtui.SetWindowTitle("after shutdown")
+	vtui.SetWindowPosition(5, 5)
+	_, _, posOK := vtui.GetWindowPosition()
+	vtui.FrameManager.ResizeWindow(70, 25)
+	vtui.FrameManager.ToggleWindowMaximized()
+	if scr := vtui.FrameManager.Screen(); scr != nil {
+		scr.Flush()
+	}
+	sm.check(!posOK, "after-shutdown calls",
+		"SetWindowTitle/SetWindowPosition/GetWindowPosition/ResizeWindow/ToggleWindowMaximized/Flush returned without crashing once RunInGUIWindow had returned (GetWindowPosition correctly reports ok=%v with no window left)", posOK)
 }
 
 func main() {
@@ -1073,6 +1220,13 @@ func main() {
 		}()
 	})
 	sm.check(err == nil, "RunInGUIWindow", "returned %v after %v", err, time.Since(start).Round(time.Millisecond))
+	// This runs on the same goroutine that called RunInGUIWindow, exactly
+	// where f4's deferred SaveSession calls GetWindowPosition today: the
+	// window, view and delegate are already released by now (vtui #1571).
+	// A background goroutine would take the already-guarded queued path
+	// instead of the one this is meant to catch a regression in, so this
+	// has to stay right here, synchronous, not spawned off.
+	sm.checkAfterShutdown()
 	select {
 	case <-driverDone:
 		sm.check(true, "shutdown", "closing the window ended the event loop and RunInGUIWindow returned")
