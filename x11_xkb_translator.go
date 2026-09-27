@@ -19,9 +19,9 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
+	"github.com/unxed/winkeys"
 	xkb "github.com/unxed/xkb-go"
 	"github.com/unxed/xkb-go/x11"
-	"github.com/unxed/winkeys"
 )
 
 type x11XKBTranslator struct {
@@ -127,18 +127,24 @@ func (t *x11XKBTranslator) TranslateX11(detail uint8, state uint16, isDown bool)
 		buf := make([]byte, 8)
 		buf[0] = t.xkbOpcode
 		buf[1] = 4 // XkbGetState
+		// #nosec G115 -- buf is the fixed 8-byte GetState request above, len(buf)/4 is always 2
 		xgb.Put16(buf[2:], uint16(len(buf)/4))
 		xgb.Put16(buf[4:], uint16(x11.UseCoreKbd))
 
 		cookie := t.conn.NewCookie(true, true)
 		t.conn.NewRequest(buf, cookie)
 		if reply, err := cookie.Reply(); err == nil && len(reply) >= 18 {
+			// #nosec G115 -- XKB limits keyboards to 4 groups (indices 0-3), so the
+			// baseGroup/latchedGroup wire values below always fit in xkb.Group's uint8.
+			baseGroup := xkb.Group(xgb.Get16(reply[14:]))
+			// #nosec G115 -- see baseGroup above.
+			latchedGroup := xkb.Group(xgb.Get16(reply[16:]))
 			t.state.UpdateMask(
 				xkb.ModMask(reply[9]),
 				xkb.ModMask(reply[10]),
 				xkb.ModMask(reply[11]),
-				xkb.Group(xgb.Get16(reply[14:])),
-				xkb.Group(xgb.Get16(reply[16:])),
+				baseGroup,
+				latchedGroup,
 				xkb.Group(reply[13]),
 			)
 		}
@@ -154,6 +160,8 @@ func (t *x11XKBTranslator) TranslateX11(detail uint8, state uint16, isDown bool)
 // from x11_host.go), but it's implemented the same way keytrans's
 // purexkb backend does for interface completeness.
 func (t *x11XKBTranslator) TranslateWayland(keycode uint32, isDown bool) winkeys.InputEvent {
+	// #nosec G115 -- evdev keycodes fit in a byte once the XKB +8 offset is applied;
+	// keytrans's purexkb backend relies on the same range for the same conversion.
 	event := t.translateKeysym(uint8(keycode+8), isDown)
 	event.InputSource = "xkb-x11"
 	return event
@@ -161,7 +169,9 @@ func (t *x11XKBTranslator) TranslateWayland(keycode uint32, isDown bool) winkeys
 
 // UpdateWaylandModifiers implements keytrans.Translator.
 func (t *x11XKBTranslator) UpdateWaylandModifiers(modsDepressed, modsLatched, modsLocked, group uint32) {
-	t.state.UpdateMask(xkb.ModMask(modsDepressed), xkb.ModMask(modsLatched), xkb.ModMask(modsLocked), 0, 0, xkb.Group(group))
+	// #nosec G115 -- XKB limits keyboards to 4 groups (indices 0-3), well within uint8.
+	waylandGroup := xkb.Group(group)
+	t.state.UpdateMask(xkb.ModMask(modsDepressed), xkb.ModMask(modsLatched), xkb.ModMask(modsLocked), 0, 0, waylandGroup)
 }
 
 // Close implements keytrans.Translator.
