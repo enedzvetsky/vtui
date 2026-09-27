@@ -143,7 +143,7 @@ func NewX11Host(cols, rows, cellW, cellH int) (*X11Host, error) {
 	if wmClass, err := xproto.InternAtom(conn, false, 8, "WM_CLASS").Reply(); err == nil && wmClass != nil {
 		data := x11WindowClassProperty()
 		xproto.ChangeProperty(conn, xproto.PropModeReplace, host.wid, wmClass.Atom,
-			xproto.AtomString, 8, uint32(len(data)), data)
+			xproto.AtomString, 8, uint32(len(data)), data) // #nosec G115 -- WM_CLASS instance/class name, always a short string
 	}
 
 	host.gc, err = xproto.NewGcontextId(conn)
