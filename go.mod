@@ -19,6 +19,8 @@ require (
 	github.com/unxed/kiwi-go v0.1.0
 	github.com/unxed/libwinescape v0.2.1
 	github.com/unxed/vtinput v0.1.8
+	github.com/unxed/winkeys v0.1.1
+	github.com/unxed/xkb-go v0.1.9-0.20260927162601-6df30840d0f4
 	golang.org/x/image v0.45.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.40.0
@@ -37,8 +39,6 @@ require (
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/neurlang/winc v0.1.2 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/unxed/winkeys v0.1.1 // indirect
-	github.com/unxed/xkb-go v0.1.8 // indirect
 	github.com/yalue/native_endian v1.0.2 // indirect
 	github.com/zzl/go-win32api/v2 v2.1.0 // indirect
 	golang.design/x/clipboard v0.7.0 // indirect

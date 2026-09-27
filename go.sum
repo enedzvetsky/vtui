@@ -53,8 +53,8 @@ github.com/unxed/wayland v0.4.5-0.20260924170549-04f3e691fadc h1:V+JWgcMDaDZ45Xx
 github.com/unxed/wayland v0.4.5-0.20260924170549-04f3e691fadc/go.mod h1:xwaL4oQv1tKzxec7AoNpcE9EAiV3thXDHG2uvrCk/QI=
 github.com/unxed/winkeys v0.1.1 h1:CeRhzQLrZtO2aVq8C8gPX1ySdbbvPombbUZ15cRjFTI=
 github.com/unxed/winkeys v0.1.1/go.mod h1:eCDbEJFdYcii0Fd4O9u+CAqjJ4SkkhWDkhikNFwBCd4=
-github.com/unxed/xkb-go v0.1.8 h1:hqPI2wJw2LQ7YOqghNYat/TJF3pFamCCPjhxI5I3lhU=
-github.com/unxed/xkb-go v0.1.8/go.mod h1:V3LaLLiIMPBQCGnPfTYN8gER39XW26AZBYeXkkZ/GWQ=
+github.com/unxed/xkb-go v0.1.9-0.20260927162601-6df30840d0f4 h1:yf9zWQWsIq3B5SQCN2hBRGDdOYGxpJS0ah2iwCkCGwY=
+github.com/unxed/xkb-go v0.1.9-0.20260927162601-6df30840d0f4/go.mod h1:p0uH0w1PGo5GU/qxcyj65edin5qHssAhvJTjCZ8nxNU=
 github.com/yalue/native_endian v1.0.2 h1:e4SxBbaCoOOO4E3axd7FSriUhzc1bIzqZGG5jl6Evbg=
 github.com/yalue/native_endian v1.0.2/go.mod h1:cr+I2WnCwDkkPV0DvgBpGQkJV12CDWR5bAoMtT+56iE=
 github.com/zzl/go-win32api/v2 v2.1.0 h1:BwXsEl3iycRhG4lpe3JsnNACyQH/U7RTBhJwyCaIB/g=
