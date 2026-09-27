@@ -40,6 +40,18 @@ type X11Host struct {
 	dnd        *x11Dnd
 	dirtyLines []bool
 
+	// renderer and scr let SetFont push a reloaded font's cell size to the
+	// renderer's rasterizer and the screen's graphics layer, without either
+	// of them holding a reference back into X11Host (vtui #136).
+	renderer *X11Renderer
+	scr      *ScreenBuf
+	fontName string
+	fontSize float64
+	// dpi is the font DPI computed once at window creation from Xft.dpi (see
+	// runInX11Window); SetFont reuses it so a font hot-swap keeps the same
+	// scaling the window opened with.
+	dpi float64
+
 	translator     keytrans.Translator
 	mouseBtn       uint32
 	initialCols    int
@@ -609,6 +621,62 @@ func (h *X11Host) flushImage() int {
 	return putCalls
 }
 
+// applyFontLocked reloads the font face at the host's dpi (the value
+// computed once from Xft.dpi when the window was created; see
+// runInX11Window) and pushes the new cell size to the renderer and the
+// screen's graphics layer. The caller holds h.mu.
+func (h *X11Host) applyFontLocked(fontName string, fontSize float64) {
+	dpi := h.dpi
+	if dpi <= 0 {
+		dpi = 72.0
+	}
+	face, cellW, cellH := loadBestFont(fontName, fontSize, dpi)
+	h.fontName = fontName
+	h.fontSize = fontSize
+	h.cellW = cellW
+	h.cellH = cellH
+	if h.renderer != nil {
+		h.renderer.setFace(face)
+	}
+	if h.scr != nil {
+		h.scr.Graphics().SetCellSize(cellW, cellH)
+	}
+}
+
+// SetFont reloads the font used to draw the grid and asks the X server to
+// resize the window to the new cell size, keeping the grid geometry (cols x
+// rows) unchanged -- the same policy WaylandHost.SetFont uses for Wayland
+// (vtui #136). It never fails: loadBestFont falls back to a built-in bitmap
+// font when fontName cannot be found.
+//
+// The ConfigureWindow request alone does not repaint: the X server only
+// sends a fresh ConfigureNotify (which drives the repaint through
+// RunEventLoop's resize handling) when the pixel size actually changes, so a
+// same-size font swap would otherwise leave the old glyphs on screen.
+// HardRefresh is called unconditionally to cover that case.
+func (h *X11Host) SetFont(fontName string, fontSize float64) {
+	if fontSize <= 0 {
+		fontSize = 18.0
+	}
+	h.mu.Lock()
+	h.applyFontLocked(fontName, fontSize)
+	conn, wid := h.conn, h.wid
+	cols, rows, cellW, cellH := h.cols, h.rows, h.cellW, h.cellH
+	h.mu.Unlock()
+
+	if conn != nil {
+		// #nosec G115 -- cols/rows are the terminal's fixed grid size and
+		// cellW/cellH are font-metric pixel sizes from loadBestFont; both
+		// pairs are always small non-negative values, so neither product
+		// approaches uint32's range.
+		width, height := uint32(cols*cellW), uint32(rows*cellH)
+		xproto.ConfigureWindow(conn, wid, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight, []uint32{width, height})
+	}
+	if FrameManager != nil {
+		FrameManager.HardRefresh()
+	}
+}
+
 func runInX11Window(cols, rows int, fontName string, fontSize float64, setupApp func()) error {
 	if runtime.GOOS == "windows" && os.Getenv("DISPLAY") == "" {
 		os.Setenv("DISPLAY", "127.0.0.1:0.0")
@@ -658,12 +726,19 @@ func runInX11Window(cols, rows int, fontName string, fontSize float64, setupApp 
 		return err
 	}
 	defer host.Close()
+	host.fontName = fontName
+	host.fontSize = fontSize
+	host.dpi = dpi
+
+	renderer := NewX11Renderer(host, face)
+	host.renderer = renderer
 
 	scr := NewScreenBuf()
 	scr.AllocBuf(cols, rows)
-	scr.Renderer = NewX11Renderer(host, face)
+	scr.Renderer = renderer
 	scr.Graphics().SetProtocol(GraphicsNative)
 	scr.Graphics().SetCellSize(cellW, cellH)
+	host.scr = scr
 
 	FrameManager.Init(scr)
 
