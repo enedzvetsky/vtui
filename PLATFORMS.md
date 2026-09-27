@@ -65,6 +65,22 @@ Turning NetBSD on in its constraints would gain the xkbcommon and XIM backends
 for consumers that replace purego with pureffi, at the cost of breaking
 everyone who does not. The trade is not worth it.
 
+### FreeBSD: gogpu's platform manager, not the FFI layer
+
+goffi's FFI layer has an implementation for FreeBSD (see above), which makes
+it tempting to drop `freebsd` from `gogpu_stub.go`'s and `gogpu_ffi_stub.go`'s
+build tags and let the real `gogpu_*.go` files select the backend there. That
+does not build: `go vet`/`go build` for `freebsd/amd64` and `freebsd/arm64`
+both fail with
+
+    github.com/gogpu/gogpu@v0.53.0/internal/platform/platform.go:475:9: undefined: newPlatformManager
+
+`gogpu` itself -- the windowing layer above goffi's FFI -- has no FreeBSD
+`newPlatformManager`, independently of whether the FFI it would call can load
+libraries. Enabling gogpu on FreeBSD needs that upstream gap closed first;
+until then FreeBSD keeps using `gogpu_stub.go` and falls back to X11, same as
+every other platform gogpu does not cover.
+
 ### plan9
 
 Does not build yet, but the target is reachable and CI for it is not the
