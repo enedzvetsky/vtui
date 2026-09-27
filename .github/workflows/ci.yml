@@ -162,6 +162,12 @@ jobs:
             goarch: arm64
             tags: ''
             gcflags: ''
+          # vtui_nococoa swaps the Cocoa backend for its stub.
+          - label: darwin/amd64 vtui_nococoa
+            goos: darwin
+            goarch: amd64
+            tags: -tags=vtui_nococoa
+            gcflags: ''
           - label: dragonfly/amd64
             goos: dragonfly
             goarch: amd64
@@ -327,6 +333,20 @@ jobs:
             tags: -tags=goffi_static
             gcflags: ''
             vetflags: ''
+          # The Cocoa backend is arm64 and amd64 code alike, and the FFI
+          # layer lays out calls for the two separately.
+          - label: darwin/amd64
+            goos: darwin
+            goarch: amd64
+            tags: ''
+            gcflags: ''
+            vetflags: ''
+          - label: darwin/arm64 vtui_nococoa
+            goos: darwin
+            goarch: arm64
+            tags: -tags=vtui_nococoa
+            gcflags: ''
+            vetflags: ''
           - label: linux/amd64 goffi_musl
             goos: linux
             goarch: amd64
@@ -403,6 +423,59 @@ jobs:
       # though vtui does not select them itself.
       - name: Vet
         run: go vet ${{ matrix.vetflags }} ${{ matrix.tags }} ${{ matrix.gcflags }} ./...
+  cocoa:
+    # The Cocoa backend end to end, on real macOS: cmd/cocoa-smoke opens the
+    # window, sends it keys, clicks, a drag, wheel notches and a resize,
+    # checks that each reached the application and that the frame handed to
+    # Core Animation shows the answer, then closes the window. report.txt,
+    # the frames it read back and screenshots of the window are uploaded
+    # for a person to look at.
+    name: Cocoa (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,   target: darwin/arm64, arch: arm64 }
+          - { os: macos-15-intel, target: darwin/amd64, arch: amd64 }
+    env:
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - name: Build
+        run: go build -o cocoa-smoke ./cmd/cocoa-smoke
+
+      - name: Run
+        env:
+          VTUI_DEBUG: cocoa-smoke-out/debug.log
+        run: |
+          mkdir -p cocoa-smoke-out
+          ./cocoa-smoke -out cocoa-smoke-out -timeout 3m
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f cocoa-smoke-out/report.txt ]; then
+            {
+              echo "### Cocoa smoke test, ${{ matrix.target }}"
+              echo '```'
+              cat cocoa-smoke-out/report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cocoa-smoke-darwin-${{ matrix.arch }}
+          path: cocoa-smoke-out
+          retention-days: 30
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

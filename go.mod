@@ -3,6 +3,7 @@ module github.com/unxed/vtui
 go 1.26.6
 
 require (
+	github.com/ebitengine/purego v0.11.0-alpha.8
 	github.com/go-webgpu/goffi v0.6.3
 	github.com/gogpu/gg v0.52.5
 	github.com/gogpu/gogpu v0.53.0
@@ -27,7 +28,6 @@ require (
 require (
 	github.com/ebitengine/gomobile v0.0.0-20260211053922-3d992dae95d1 // indirect
 	github.com/ebitengine/hideconsole v1.0.0 // indirect
-	github.com/ebitengine/purego v0.11.0-alpha.8 // indirect
 	github.com/emmansun/base64 v0.9.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/go-webgpu/webgpu v0.5.5 // indirect
