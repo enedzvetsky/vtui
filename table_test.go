@@ -1466,6 +1466,7 @@ func TestTable_HeaderClickSortFollowsTheDrawnHeader(t *testing.T) {
 					c := scr.buf[y*scr.width+x].Char
 					if c > utf8.MaxRune {
 						t.Fatalf("cell (%d,%d) holds %#x, not a rune", x, y, c)
+						return ""
 					}
 					b.WriteRune(rune(c))
 				}
