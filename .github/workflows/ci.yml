@@ -479,6 +479,11 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    # id-token: write lets codecov-action mint an OIDC token and upload
+    # without a CODECOV_TOKEN secret (see the Codecov step below).
+    permissions:
+      id-token: write
+      contents: read
     env:
       CGO_ENABLED: 0
     steps:
@@ -498,3 +503,17 @@ jobs:
             coverage.out
             coverage.txt
           retention-days: 30
+      # Per-file numbers for the fleet (unxed/lunobot, LUNOBOT.md § 7.4):
+      # https://api.codecov.io/api/v2/gh/unxed/repos/vtui/report/
+      # There is no CODECOV_TOKEN secret, so the upload authenticates with
+      # OIDC (id-token above). That works for main and same-repo pull
+      # requests (the lunobot trains), not for forks; a failed upload never
+      # turns the run red -- coverage is a report here, not a gate.
+      - name: Upload coverage to Codecov
+        if: hashFiles('coverage.out') != ''
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.out
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false

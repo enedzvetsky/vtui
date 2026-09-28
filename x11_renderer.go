@@ -283,9 +283,9 @@ func (r *X11Renderer) Render(buf, shadow []CharInfo, w, h int, forceRedraw bool)
 	}
 	if r.host.imgBuf == nil || r.host.imgBuf.Bounds().Dx() != windowWidth || r.host.imgBuf.Bounds().Dy() != windowHeight {
 		r.host.imgBuf = image.NewRGBA(image.Rect(0, 0, windowWidth, windowHeight))
-		if r.host.shmSeg == 0 {
-			r.host.bgraBuf = make([]byte, len(r.host.imgBuf.Pix))
-		}
+		// The shared segment is kept while the new size fits it; a size
+		// that does not switches the host to core PutImage (f4 #1626).
+		r.host.ensureBGRABufLocked()
 		r.host.dirtyLines = make([]bool, windowHeight)
 		for i := range r.host.dirtyLines {
 			r.host.dirtyLines[i] = true

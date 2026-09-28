@@ -20,6 +20,7 @@ require (
 	github.com/unxed/libwinescape v0.2.1
 	github.com/unxed/vtinput v0.1.8
 	github.com/unxed/winkeys v0.1.1
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/image v0.45.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.40.0

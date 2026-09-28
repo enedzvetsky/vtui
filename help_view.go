@@ -308,8 +308,14 @@ func (hv *HelpView) renderLine(scr *ScreenBuf, x, y int, line string, width int,
 
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
-		switch r {
-		case '#':
+		literal := false
+		if r == helpLiteral && i+1 < len(runes) {
+			i++
+			r, literal = runes[i], true
+		}
+		switch {
+		case literal:
+		case r == '#':
 			inBold = !inBold
 			if inBold {
 				currAttr = Palette[ColHelpBold]
@@ -317,7 +323,7 @@ func (hv *HelpView) renderLine(scr *ScreenBuf, x, y int, line string, width int,
 				currAttr = Palette[ColHelpText]
 			}
 			continue
-		case '~':
+		case r == '~':
 			inLink = !inLink
 			if inLink {
 				if linkTriggerCount < len(lineLinks) {
@@ -662,10 +668,16 @@ func (hv *HelpView) findLinkAt(mx, my int) int {
 
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
-		switch r {
-		case '#':
+		literal := false
+		if r == helpLiteral && i+1 < len(runes) {
+			i++
+			r, literal = runes[i], true
+		}
+		switch {
+		case literal:
+		case r == '#':
 			continue
-		case '~':
+		case r == '~':
 			inLink = !inLink
 			if inLink {
 				if linkTriggerCount < len(lineLinkIndices) {

@@ -363,6 +363,11 @@ func handleSemanticChildrenAction(children []UIElement, target string, action ma
 }
 
 // --- Реализация семантики для базовых компонентов vtui ---
+//
+// A disabled control ignores semantic actions exactly as it ignores the
+// keyboard and the mouse: an external GUI or an automation script must not be
+// able to toggle, select, edit or focus what the user cannot. SetDisabled drops
+// focus for the same reason, so "focus" on a disabled control is refused too.
 
 func (w *Window) SemanticNode(ctx *SemanticContext) map[string]any {
 	x1, y1, x2, y2 := w.GetPosition()
@@ -465,6 +470,9 @@ func (b *Button) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (b *Button) HandleSemanticAction(action map[string]any) bool {
+	if b.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "activate", "control.activate":
 		return b.ProcessKey(&vtinput.InputEvent{Type: vtinput.KeyEventType, KeyDown: true, VirtualKeyCode: vtinput.VK_RETURN})
@@ -495,6 +503,9 @@ func (cb *Checkbox) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (cb *Checkbox) HandleSemanticAction(action map[string]any) bool {
+	if cb.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "toggle", "control.toggle":
 		cb.Toggle()
@@ -526,6 +537,9 @@ func (cg *CheckGroup) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (cg *CheckGroup) HandleSemanticAction(action map[string]any) bool {
+	if cg.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "select", "control.select":
 		idx := semanticInt(action["index"])
@@ -562,6 +576,9 @@ func (rg *RadioGroup) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (rg *RadioGroup) HandleSemanticAction(action map[string]any) bool {
+	if rg.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "select", "control.select":
 		idx := semanticInt(action["index"])
@@ -619,6 +636,9 @@ func (cb *ComboBox) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (cb *ComboBox) HandleSemanticAction(action map[string]any) bool {
+	if cb.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "select", "control.select":
 		idx := semanticInt(action["index"])
@@ -660,6 +680,9 @@ func (e *Edit) SemanticNode(ctx *SemanticContext) map[string]any {
 }
 
 func (e *Edit) HandleSemanticAction(action map[string]any) bool {
+	if e.IsDisabled() {
+		return false
+	}
 	switch semanticString(action["action"]) {
 	case "set_text", "control.setText":
 		e.SetText(semanticString(action["text"]))
