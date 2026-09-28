@@ -47,8 +47,8 @@ github.com/unxed/libwinescape v0.2.1 h1:ZqJAswhO9WbXt6EDId5SRBtAN7gqdYnqZbzFGLUS
 github.com/unxed/libwinescape v0.2.1/go.mod h1:tDmnUN0ij+iiqOovxUybQWgpm/Q8IEst6n8VTn3I1AE=
 github.com/unxed/pureffi v0.1.21 h1:V0jHKUWpNGpX33XI1Lf1wypFpwuXV55CKKadi+wnTpg=
 github.com/unxed/pureffi v0.1.21/go.mod h1:0maabTbD8JYY2NPzeTeEbSTDMvDQE0JQc+vesFJqDmo=
-github.com/unxed/vtinput v0.1.8 h1:fo2LKaJZZGARq4SiXk3PGKBE0Ozy3Yy90E06RrTXDcY=
-github.com/unxed/vtinput v0.1.8/go.mod h1:ZOqbBmEzYb33FrwsJf0y1QSJLo378ciXEgZWD4cTqGU=
+github.com/unxed/vtinput v0.1.9 h1:OmtlAe/tfEAJOpJZdETZ+D6LR/7TbRkElTEhHy3hzQk=
+github.com/unxed/vtinput v0.1.9/go.mod h1:ZOqbBmEzYb33FrwsJf0y1QSJLo378ciXEgZWD4cTqGU=
 github.com/unxed/wayland v0.4.5-0.20260927204637-1d1e40619f6f h1:LQkirvBr82Zn8SmcXVnu82NMK7iZL9pPQ8gLqaj4Izo=
 github.com/unxed/wayland v0.4.5-0.20260927204637-1d1e40619f6f/go.mod h1:ig+MsKApI3HEz+q+OdKGv3RPZT23znaw2pC7UWMR5yc=
 github.com/unxed/winkeys v0.1.1 h1:CeRhzQLrZtO2aVq8C8gPX1ySdbbvPombbUZ15cRjFTI=
