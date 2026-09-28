@@ -116,6 +116,10 @@ func parseHelpLinksInto(topic *HelpTopic, line string, lineIdx int) {
 	// Simple state machine for ~LinkText~Target@
 	start := -1
 	for i := 0; i < len(line); i++ {
+		if line[i] == helpLiteral {
+			i++ // the character after it is text
+			continue
+		}
 		if line[i] == '~' {
 			if start == -1 {
 				start = i
@@ -125,7 +129,7 @@ func parseHelpLinksInto(topic *HelpTopic, line string, lineIdx int) {
 				atIdx := strings.Index(line[targetStart:], "@")
 				if atIdx != -1 {
 					atIdx += targetStart
-					linkText := line[start+1 : i]
+					linkText := strings.ReplaceAll(line[start+1:i], string(helpLiteral), "")
 					target := line[targetStart:atIdx]
 
 					// Calculate visual positions (simplified, assuming 1 char = 1 cell for now)

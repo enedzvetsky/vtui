@@ -13,12 +13,20 @@ import (
 // space instead (f4 #378); wrapHelpTopic does that on a copy of the topic, the
 // way the window is now, so nothing downstream of HelpView has to know.
 
+// helpLiteral before a character makes it plain text: "\x10#" draws a '#'
+// instead of toggling bold, "\x10~" a '~' instead of starting a link. The .hlf
+// format has no escape (its authors write around the markup), but a Markdown
+// document can have any of these characters in its text (markdown.go), so the
+// markup needs one. A control character is used because no help text has one.
+const helpLiteral = '\x10'
+
 // helpCell is one drawn character of a help line and the markup it was under.
 type helpCell struct {
 	r    rune
 	w    int
 	bold bool
-	link int // index into the line's link targets, or -1
+	link int  // index into the line's link targets, or -1
+	lit  bool // came escaped by helpLiteral, and is written back so
 }
 
 // parseHelpCells reads a line of help markup into the characters it draws and
@@ -31,6 +39,12 @@ func parseHelpCells(line string) ([]helpCell, []string) {
 	bold := false
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
+		if r == helpLiteral && i+1 < len(runes) {
+			i++
+			r = runes[i]
+			cells = append(cells, helpCell{r: r, w: helpRuneWidth(r), bold: bold, link: -1, lit: true})
+			continue
+		}
 		if r == '#' {
 			bold = !bold
 			continue
@@ -44,11 +58,15 @@ func parseHelpCells(line string) ([]helpCell, []string) {
 			if close1 >= 0 && at >= 0 {
 				link := len(targets)
 				targets = append(targets, string(runes[close1+1:at]))
-				for _, t := range runes[i+1 : close1] {
-					if t == '#' {
+				for j := i + 1; j < close1; j++ {
+					t, lit := runes[j], false
+					if t == helpLiteral && j+1 < close1 {
+						j++
+						t, lit = runes[j], true
+					} else if t == '#' {
 						continue
 					}
-					cells = append(cells, helpCell{r: t, w: helpRuneWidth(t), link: link})
+					cells = append(cells, helpCell{r: t, w: helpRuneWidth(t), link: link, lit: lit})
 				}
 				i = at
 				continue
@@ -59,8 +77,14 @@ func parseHelpCells(line string) ([]helpCell, []string) {
 	return cells, targets
 }
 
+// indexRune finds want in runes from from on, passing over a character
+// escaped by helpLiteral.
 func indexRune(runes []rune, want rune, from int) int {
 	for i := from; i < len(runes); i++ {
+		if runes[i] == helpLiteral {
+			i++
+			continue
+		}
 		if runes[i] == want {
 			return i
 		}
@@ -141,6 +165,9 @@ func helpCellsMarkup(row []helpCell, targets []string) string {
 		if c.link != link {
 			b.WriteRune('~')
 			link = c.link
+		}
+		if c.lit {
+			b.WriteRune(helpLiteral)
 		}
 		b.WriteRune(c.r)
 	}
