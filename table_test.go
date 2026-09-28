@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/unxed/vtinput"
 )
@@ -1462,7 +1463,11 @@ func TestTable_HeaderClickSortFollowsTheDrawnHeader(t *testing.T) {
 			row := func(y int) string {
 				var b strings.Builder
 				for x := 0; x < scr.width; x++ {
-					b.WriteRune(rune(scr.buf[y*scr.width+x].Char))
+					c := scr.buf[y*scr.width+x].Char
+					if c > utf8.MaxRune {
+						t.Fatalf("cell (%d,%d) holds %#x, not a rune", x, y, c)
+					}
+					b.WriteRune(rune(c))
 				}
 				return b.String()
 			}
@@ -1474,7 +1479,7 @@ func TestTable_HeaderClickSortFollowsTheDrawnHeader(t *testing.T) {
 				tbl.ProcessMouse(&vtinput.InputEvent{
 					Type: vtinput.MouseEventType, KeyDown: true,
 					ButtonState: vtinput.FromLeft1stButtonPressed,
-					MouseX:      int16(x), MouseY: int16(y),
+					MouseX:      int16(x), MouseY: int16(y), //nolint:gosec // test-fixed small coordinates
 				})
 			}
 
