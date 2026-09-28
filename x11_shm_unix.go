@@ -15,6 +15,11 @@ var (
 	shmId   int
 	shmAddr uintptr
 	shmData []byte
+	// shmReady says the segment was created and mapped. shmId cannot say it:
+	// 0 is a valid System V shm id (the first segment in a fresh IPC
+	// namespace, as on CI runners), and testing shmId > 0 silently disabled
+	// MIT-SHM there.
+	shmReady bool
 )
 
 var shmSetupDone bool
@@ -58,17 +63,29 @@ func setupX11SHM() {
 	shmId = id
 	shmAddr = addr
 	shmData = bytesAtAddress(shmAddr, size)
+	shmReady = true
 	DebugLog("X11: Allocated shared memory segment (ID: %d)", shmId)
 }
+
+// x11shmInit attaches the segment on the server side and returns its id, or 0
+// when MIT-SHM is unavailable. The attach is checked: a server that cannot
+// map the segment (another IPC namespace, a sandboxed Xwayland) reports that
+// here, and the host then draws through core PutImage from the start instead
+// of discovering it on the first frame (f4 #1626).
 func x11shmInit(conn *xgb.Conn, id int) uint32 {
 	if err := shm.Init(conn); err != nil {
+		DebugLog("X11: MIT-SHM extension unavailable: %v", err)
 		return 0
 	}
 	seg, err := shm.NewSegId(conn)
 	if err != nil {
+		DebugLog("X11: MIT-SHM segment id allocation failed: %v", err)
 		return 0
 	}
-	shm.Attach(conn, seg, uint32(id), false)
+	if err := shm.AttachChecked(conn, seg, uint32(id), false).Check(); err != nil {
+		DebugLog("X11: MIT-SHM attach failed: %v", err)
+		return 0
+	}
 	return uint32(seg)
 }
 
@@ -76,12 +93,36 @@ func x11shmDetach(conn *xgb.Conn, seg uint32) {
 	shm.Detach(conn, shm.Seg(seg))
 }
 
-func x11shmPutImage(conn *xgb.Conn, wid xproto.Window, gc xproto.Gcontext, w, h2 uint16, minY, maxY int, seg uint32) {
-	shm.PutImage(conn, xproto.Drawable(wid), gc,
+// x11shmMajorOpcode is the major opcode the server assigned to MIT-SHM, so
+// that an asynchronous X error can be traced back to a ShmPutImage; 0 when
+// the extension was not initialized.
+func x11shmMajorOpcode(conn *xgb.Conn) byte {
+	if conn == nil {
+		return 0
+	}
+	conn.ExtLock.RLock()
+	defer conn.ExtLock.RUnlock()
+	return conn.Extensions["MIT-SHM"]
+}
+
+// x11shmPutImage sends rows minY..maxY of the w x h2 image in the segment.
+// With checked set it waits for the server's verdict and returns the X error,
+// if any; otherwise the request is fire-and-forget and an error arrives later
+// through WaitForEvent.
+func x11shmPutImage(conn *xgb.Conn, wid xproto.Window, gc xproto.Gcontext, w, h2 uint16, minY, maxY int, depth byte, seg uint32, checked bool) error {
+	put := shm.PutImage
+	if checked {
+		put = shm.PutImageChecked
+	}
+	cookie := put(conn, xproto.Drawable(wid), gc,
 		w, h2,
 		0, uint16(minY),
 		w, uint16(maxY-minY+1),
 		0, int16(minY),
-		24, 2, 0,
+		depth, xproto.ImageFormatZPixmap, 0,
 		shm.Seg(seg), 0)
+	if checked {
+		return cookie.Check()
+	}
+	return nil
 }

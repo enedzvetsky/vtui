@@ -7,6 +7,7 @@ import (
 	"image"
 	"io"
 	"os"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -19,26 +20,34 @@ import (
 )
 
 type X11Host struct {
-	mu         sync.Mutex
-	conn       *xgb.Conn
-	wid        xproto.Window
-	screen     *xproto.ScreenInfo
-	gc         xproto.Gcontext
-	shmSeg     uint32
-	width      uint16
-	height     uint16
-	depth      byte
-	cellW      int
-	cellH      int
-	scale      int
-	imgBuf     *image.RGBA
-	bgraBuf    []byte
-	reader     *vtinput.Reader
-	cols, rows int
-	closeChan  chan struct{}
-	atomDelete xproto.Atom
-	dnd        *x11Dnd
-	dirtyLines []bool
+	mu     sync.Mutex
+	conn   *xgb.Conn
+	wid    xproto.Window
+	screen *xproto.ScreenInfo
+	gc     xproto.Gcontext
+	shmSeg uint32
+	// shmMajor is MIT-SHM's major opcode, used to recognize an asynchronous
+	// X error as coming from a ShmPutImage (see x11IsSHMError).
+	shmMajor byte
+	// shmVerifiedW/H is the image size the last checked ShmPutImage went
+	// through at. The first SHM flush at any other size waits for the
+	// server's verdict, so a server that rejects it makes the host fall back
+	// to core PutImage instead of leaving a frozen window (f4 #1626).
+	shmVerifiedW, shmVerifiedH int
+	width                      uint16
+	height                     uint16
+	depth                      byte
+	cellW                      int
+	cellH                      int
+	scale                      int
+	imgBuf                     *image.RGBA
+	bgraBuf                    []byte
+	reader                     *vtinput.Reader
+	cols, rows                 int
+	closeChan                  chan struct{}
+	atomDelete                 xproto.Atom
+	dnd                        *x11Dnd
+	dirtyLines                 []bool
 
 	// renderer and scr let SetFont push a reloaded font's cell size to the
 	// renderer's rasterizer and the screen's graphics layer, without either
@@ -172,11 +181,16 @@ func NewX11Host(cols, rows, cellW, cellH int) (*X11Host, error) {
 		setupX11SHM()
 	}
 
-	if shmId > 0 && !forceNoShm {
-		host.bgraBuf = shmData
+	if shmReady && !forceNoShm {
 		host.shmSeg = x11shmInit(conn, shmId)
+		host.shmMajor = x11shmMajorOpcode(conn)
+	}
+	if host.shmSeg != 0 {
+		host.bgraBuf = shmData
+		DebugLog("X11: drawing through MIT-SHM (segment %d bytes)", len(shmData))
 	} else {
 		host.bgraBuf = make([]byte, len(host.imgBuf.Pix))
+		DebugLog("X11: drawing through core PutImage (VTUI_NO_SHM=%t)", forceNoShm)
 	}
 
 	protocolsAtom, _ := xproto.InternAtom(conn, false, 12, "WM_PROTOCOLS").Reply()
@@ -272,6 +286,7 @@ func (h *X11Host) RunEventLoop() {
 	for {
 		ev, err := h.conn.WaitForEvent()
 		if err != nil {
+			h.handleXError(err)
 			continue
 		}
 		if ev == nil {
@@ -562,11 +577,16 @@ func (h *X11Host) translateModifiers(state uint16) vtinput.ControlKeyState {
 func (h *X11Host) flushImage() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.flushImageLocked()
+}
+
+func (h *X11Host) flushImageLocked() int {
 	b := h.imgBuf.Bounds()
 	w, h2 := b.Dx(), b.Dy()
 	if w <= 0 || h2 <= 0 {
 		return 0
 	}
+	h.ensureBGRABufLocked()
 
 	pix := h.imgBuf.Pix
 	lineStride := w * 4
@@ -574,15 +594,18 @@ func (h *X11Host) flushImage() int {
 
 	maxReq := int(xproto.Setup(h.conn).MaximumRequestLength) * 4
 	rowsPerReqLimit := (maxReq - 24) / lineStride
+	if rowsPerReqLimit < 1 {
+		rowsPerReqLimit = 1
+	}
 
-	for y := 0; y < h2; {
+	for y := 0; y < h2 && y < len(h.dirtyLines); {
 		if !h.dirtyLines[y] {
 			y++
 			continue
 		}
 
 		start := y
-		for y < h2 && h.dirtyLines[y] && (y-start) < rowsPerReqLimit {
+		for y < h2 && y < len(h.dirtyLines) && h.dirtyLines[y] && (y-start) < rowsPerReqLimit {
 			h.dirtyLines[y] = false
 			y++
 		}
@@ -600,7 +623,17 @@ func (h *X11Host) flushImage() int {
 		}
 
 		if h.shmSeg != 0 {
-			x11shmPutImage(h.conn, h.wid, h.gc, uint16(w), uint16(h2), start, end-1, h.shmSeg)
+			checked := x11SHMNeedsCheck(w, h2, h.shmVerifiedW, h.shmVerifiedH)
+			if err := x11shmPutImage(h.conn, h.wid, h.gc, uint16(w), uint16(h2), start, end-1, h.depth, h.shmSeg, checked); err != nil {
+				// The server refused the image at this size: stop using
+				// shared memory and send the whole frame the core way.
+				h.disableSHMLocked(fmt.Sprintf("ShmPutImage %dx%d failed: %v", w, h2, err))
+				return putCalls + h.flushImageLocked()
+			}
+			if checked {
+				h.shmVerifiedW, h.shmVerifiedH = w, h2
+				DebugLog("X11: MIT-SHM PutImage verified at %dx%d", w, h2)
+			}
 		} else {
 			xproto.PutImage(h.conn, xproto.ImageFormatZPixmap, xproto.Drawable(h.wid), h.gc,
 				uint16(w), uint16(end-start), 0, int16(start), 0, h.depth, h.bgraBuf[start*lineStride:end*lineStride])
@@ -609,6 +642,104 @@ func (h *X11Host) flushImage() int {
 	}
 
 	return putCalls
+}
+
+// x11SHMNeedsCheck reports whether a ShmPutImage of a w x h image must be
+// checked: the first one at every new size is, so a size the server will
+// not accept is noticed at once rather than as a window that stops updating.
+func x11SHMNeedsCheck(w, h, verifiedW, verifiedH int) bool {
+	return w != verifiedW || h != verifiedH
+}
+
+// x11SHMFits reports whether a w x h 32bpp image fits in a segment of
+// segLen bytes; flushImage writes the image at offset 0.
+func x11SHMFits(w, h, segLen int) bool {
+	return w > 0 && h > 0 && w*h*4 <= segLen
+}
+
+// ensureBGRABufLocked keeps the BGRA staging buffer in step with imgBuf: the
+// shared segment while MIT-SHM is in use and the image fits it, a private
+// slice of the image's size otherwise. The caller holds h.mu.
+func (h *X11Host) ensureBGRABufLocked() {
+	if h.imgBuf == nil {
+		return
+	}
+	b := h.imgBuf.Bounds()
+	if h.shmSeg != 0 {
+		if x11SHMFits(b.Dx(), b.Dy(), len(shmData)) {
+			h.bgraBuf = shmData
+			return
+		}
+		h.disableSHMLocked(fmt.Sprintf("%dx%d image does not fit the %d-byte segment", b.Dx(), b.Dy(), len(shmData)))
+	}
+	if len(h.bgraBuf) != len(h.imgBuf.Pix) {
+		h.bgraBuf = make([]byte, len(h.imgBuf.Pix))
+	}
+}
+
+// disableSHMLocked switches the host to core PutImage for the rest of its
+// life -- what VTUI_NO_SHM=1 does from the start -- and marks the whole image
+// dirty so the next flush repaints everything the failed requests lost. The
+// caller holds h.mu.
+func (h *X11Host) disableSHMLocked(reason string) {
+	if h.shmSeg == 0 {
+		return
+	}
+	DebugLog("X11: MIT-SHM disabled, falling back to core PutImage: %s", reason)
+	if h.conn != nil {
+		x11shmDetach(h.conn, h.shmSeg)
+	}
+	h.shmSeg = 0
+	h.shmVerifiedW, h.shmVerifiedH = 0, 0
+	if h.imgBuf != nil {
+		h.bgraBuf = make([]byte, len(h.imgBuf.Pix))
+	} else {
+		h.bgraBuf = nil
+	}
+	for i := range h.dirtyLines {
+		h.dirtyLines[i] = true
+	}
+}
+
+// handleXError is where RunEventLoop's asynchronous X errors go instead of
+// being dropped: each is logged, and one raised by a ShmPutImage turns the
+// shared-memory path off and repaints the window through core PutImage.
+func (h *X11Host) handleXError(err error) {
+	DebugLog("X11: error from the X server: %v", err)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.shmSeg == 0 || !x11IsSHMError(err, h.shmMajor) {
+		return
+	}
+	h.disableSHMLocked(err.Error())
+	if h.imgBuf != nil && h.conn != nil {
+		h.flushImageLocked()
+	}
+}
+
+// x11IsSHMError reports whether err is an X error raised by a MIT-SHM
+// request. xgb gives every error its own struct type (core ones such as
+// Value, Match and Access, and MIT-SHM's BadSeg) but they all carry the
+// failing request's MajorOpcode field, which is read here by reflection.
+func x11IsSHMError(err error, shmMajor byte) bool {
+	if err == nil || shmMajor == 0 {
+		return false
+	}
+	v := reflect.ValueOf(err)
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return false
+	}
+	f := v.FieldByName("MajorOpcode")
+	if !f.IsValid() || f.Kind() != reflect.Uint8 {
+		return false
+	}
+	return byte(f.Uint()) == shmMajor
 }
 
 // applyFontLocked reloads the font face at the host's dpi (the value
