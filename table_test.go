@@ -2,6 +2,7 @@ package vtui
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/unxed/vtinput"
@@ -1433,5 +1434,78 @@ func TestTable_MouseWheelReportsTheNewSelection(t *testing.T) {
 	tbl.ProcessMouse(&vtinput.InputEvent{Type: vtinput.MouseEventType, WheelDirection: -1})
 	if len(got) != 0 {
 		t.Fatalf("a wheel notch that moved nothing was reported: %v", got)
+	}
+}
+
+// With QuickSearch on, the search line takes the top row and the header is
+// drawn one row lower; the header click has to hit where the header is drawn,
+// and a click on the search line must not sort (f4 #312: clicking a column
+// title did nothing, clicking the search line sorted by the column under it).
+func TestTable_HeaderClickSortFollowsTheDrawnHeader(t *testing.T) {
+	for _, quickSearch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "plain", true: "quicksearch"}[quickSearch], func(t *testing.T) {
+			SetDefaultPalette()
+			scr := NewSilentScreenBuf()
+			scr.AllocBuf(12, 6)
+
+			cols := []TableColumn{{Title: "C1", Width: 5}, {Title: "C2", Width: 5}}
+			tbl := NewTable(0, 0, 11, 5, cols)
+			tbl.QuickSearch = quickSearch
+			tbl.Sortable = true
+			tbl.SetRows([]TableRow{mockRow{"B", "1"}, mockRow{"A", "2"}})
+			tbl.Show(scr)
+
+			headerY, searchY := 0, -1
+			if quickSearch {
+				headerY, searchY = 1, 0
+			}
+			row := func(y int) string {
+				var b strings.Builder
+				for x := 0; x < scr.width; x++ {
+					b.WriteRune(rune(scr.buf[y*scr.width+x].Char))
+				}
+				return b.String()
+			}
+			if r := row(headerY); !strings.Contains(r, "C2") {
+				t.Fatalf("header is expected on row %d, got %q", headerY, r)
+			}
+
+			click := func(x, y int) {
+				tbl.ProcessMouse(&vtinput.InputEvent{
+					Type: vtinput.MouseEventType, KeyDown: true,
+					ButtonState: vtinput.FromLeft1stButtonPressed,
+					MouseX:      int16(x), MouseY: int16(y),
+				})
+			}
+
+			if searchY >= 0 {
+				click(8, searchY)
+				if tbl.SortColumn != -1 {
+					t.Fatalf("a click on the search line must not sort, got col=%d", tbl.SortColumn)
+				}
+			}
+
+			click(8, headerY)
+			if tbl.SortColumn != 1 || !tbl.SortAscending {
+				t.Fatalf("header click: want col 1 ascending, got col=%d asc=%v", tbl.SortColumn, tbl.SortAscending)
+			}
+			if tbl.Rows[tbl.RowAt(0)].(mockRow).col2 != "1" {
+				t.Error("rows must be sorted by C2 ascending")
+			}
+			click(8, headerY)
+			if tbl.SortColumn != 1 || tbl.SortAscending {
+				t.Fatalf("second header click: want col 1 descending, got col=%d asc=%v", tbl.SortColumn, tbl.SortAscending)
+			}
+			if tbl.Rows[tbl.RowAt(0)].(mockRow).col2 != "2" {
+				t.Error("rows must be sorted by C2 descending")
+			}
+
+			// The first data row right below the header still selects a row.
+			tbl.SetSelectPos(1)
+			click(2, headerY+1)
+			if tbl.SelectPos != 0 {
+				t.Errorf("click on the first data row must select it, got %d", tbl.SelectPos)
+			}
+		})
 	}
 }
