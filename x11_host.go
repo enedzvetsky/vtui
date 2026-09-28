@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"runtime"
@@ -583,9 +584,12 @@ func (h *X11Host) flushImage() int {
 func (h *X11Host) flushImageLocked() int {
 	b := h.imgBuf.Bounds()
 	w, h2 := b.Dx(), b.Dy()
-	if w <= 0 || h2 <= 0 {
+	// X11 image and window dimensions are CARD16: nothing larger can be
+	// put on the window, so such a frame is not drawn at all.
+	if w <= 0 || h2 <= 0 || w > math.MaxUint16 || h2 > math.MaxUint16 {
 		return 0
 	}
+	w16, h16 := uint16(w), uint16(h2)
 	h.ensureBGRABufLocked()
 
 	pix := h.imgBuf.Pix
@@ -624,7 +628,7 @@ func (h *X11Host) flushImageLocked() int {
 
 		if h.shmSeg != 0 {
 			checked := x11SHMNeedsCheck(w, h2, h.shmVerifiedW, h.shmVerifiedH)
-			if err := x11shmPutImage(h.conn, h.wid, h.gc, uint16(w), uint16(h2), start, end-1, h.depth, h.shmSeg, checked); err != nil {
+			if err := x11shmPutImage(h.conn, h.wid, h.gc, w16, h16, start, end-1, h.depth, h.shmSeg, checked); err != nil {
 				// The server refused the image at this size: stop using
 				// shared memory and send the whole frame the core way.
 				h.disableSHMLocked(fmt.Sprintf("ShmPutImage %dx%d failed: %v", w, h2, err))
@@ -739,7 +743,7 @@ func x11IsSHMError(err error, shmMajor byte) bool {
 	if !f.IsValid() || f.Kind() != reflect.Uint8 {
 		return false
 	}
-	return byte(f.Uint()) == shmMajor
+	return f.Uint() == uint64(shmMajor)
 }
 
 // applyFontLocked reloads the font face at the host's dpi (the value

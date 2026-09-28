@@ -3,6 +3,7 @@
 package vtui
 
 import (
+	"math"
 	"unsafe"
 
 	"github.com/jezek/xgb"
@@ -75,6 +76,12 @@ func setupX11SHM() {
 func x11shmInit(conn *xgb.Conn, id int) uint32 {
 	if err := shm.Init(conn); err != nil {
 		DebugLog("X11: MIT-SHM extension unavailable: %v", err)
+		return 0
+	}
+	// A SysV shm id is a non-negative C int; anything else is not a segment
+	// the server could attach.
+	if id < 0 || int64(id) > math.MaxUint32 {
+		DebugLog("X11: MIT-SHM segment id %d out of range", id)
 		return 0
 	}
 	seg, err := shm.NewSegId(conn)

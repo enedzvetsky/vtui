@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // mdVisible is a line of help markup as the reader sees it.
@@ -163,6 +164,10 @@ func TestMarkdownView_CodeBlockHashDrawnAsText(t *testing.T) {
 		c := scr.GetCell(x, 0)
 		if c.Char == 0 {
 			break
+		}
+		if c.Char > utf8.MaxRune {
+			t.Fatalf("cell %d holds %#x, not a rune", x, c.Char)
+			return
 		}
 		b.WriteRune(rune(c.Char))
 	}
