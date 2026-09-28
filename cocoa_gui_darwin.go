@@ -527,6 +527,19 @@ func registerCocoaClasses() error {
 		{Cmd: objc.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), Fn: func(objc.ID, objc.SEL, objc.ID) bool {
 			return false
 		}},
+		{Cmd: objc.RegisterName("applicationDidFinishLaunching:"), Fn: func(objc.ID, objc.SEL, objc.ID) {
+			defer cocoaCallbackRecover("applicationDidFinishLaunching:")
+			// -run calls finishLaunching itself, the first time it runs, before
+			// it starts pumping events; this delegate method is where AppKit
+			// considers the app fully launched. Activating any earlier --
+			// right after setActivationPolicy: promotes this ordinary
+			// executable (no bundle, so no Info.plist to say it upfront) to a
+			// regular, Dock-visible app, and before -run had even been sent --
+			// asked the Window Server to bring a not-yet-fully-registered app
+			// to the front (vtui #1571).
+			app := objc.ID(cocoaRT.classNSApplication).Send(cocoaSel.sharedApplication)
+			app.Send(cocoaSel.activateIgnoringOtherApps, true)
+		}},
 	})
 	if err != nil {
 		return fmt.Errorf("cocoa: registering the application delegate class: %w", err)
@@ -1427,7 +1440,9 @@ func RunCocoaGuiHost(cols, rows int, fontName string, fontSize float64, setupApp
 	view.Send(cocoaSel.setNeedsDisplay, true)
 
 	window.Send(cocoaSel.makeKeyAndOrderFront, objc.ID(0))
-	app.Send(cocoaSel.activateIgnoringOtherApps, true)
+	// Not activateIgnoringOtherApps here: -run below sends finishLaunching
+	// the first time it runs, and applicationDidFinishLaunching: above does
+	// the activation once AppKit is done with it (vtui #1571).
 
 	runDone := make(chan struct{})
 	go func() {

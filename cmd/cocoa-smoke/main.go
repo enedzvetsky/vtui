@@ -681,6 +681,7 @@ func (sm *smoke) run() {
 	if !sm.check(sm.cellW > 0 && sm.cellH > 0, "cell size", "%dx%d", sm.cellW, sm.cellH) {
 		return
 	}
+	sm.checkAppActive()
 
 	img, ok := sm.waitCellColor("first frame", redCell, colRed, 15*time.Second)
 	if !ok {
@@ -1123,6 +1124,22 @@ func (sm *smoke) checkResizeGrid() {
 		sm.check(rgbOf(c) == colRed, "resize-grid content", "cell %v shows %06X (want %06X)", redCell, rgbOf(c), colRed)
 	}
 	sm.savePNG("frame-05-resize-grid.png", img)
+}
+
+// checkAppActive waits for NSApp to report itself active, the way it must
+// once the window is up. activateIgnoringOtherApps: used to run before
+// -run's own finishLaunching (vtui #1571): moved into
+// applicationDidFinishLaunching: instead, it now runs at the point AppKit
+// itself considers the app launched, rather than a moment before the Window
+// Server had necessarily caught up with setActivationPolicy: promoting this
+// bundle-less executable to a regular, Dock-visible app.
+func (sm *smoke) checkAppActive() {
+	var active bool
+	ok := waitFor(5*time.Second, func() bool {
+		_ = onMain(func() { active = objc.Send[bool](class("NSApplication").Send(s("sharedApplication")), s("isActive")) })
+		return active
+	})
+	sm.check(ok && active, "app active", "NSApp.isActive is %v once the window is up (must become active through applicationDidFinishLaunching:)", active)
 }
 
 // checkInvalidUTF8Title sets a title that is not valid UTF-8, the way an
