@@ -160,11 +160,13 @@ Two properties of the FFI layer (pureffi, over goffi) shape the code:
   the keyboard layout through `UCKeyTranslate`, which also combines dead
   keys; input methods that compose in a window of their own (Chinese,
   Japanese, Korean) do not work.
-- On arm64, arguments that spill to the stack each take an 8-byte slot,
-  where Apple's ABI packs the small ones. Every call the backend makes fits
-  in registers. `cmd/cocoa-smoke` builds its key events with Quartz event
-  services instead of `+[NSEvent keyEventWithType:...]`, whose `BOOL` and
-  `unsigned short` land on the stack.
+- On arm64, arguments that spill to the stack each take an 8-byte slot in
+  goffi's calls, where Apple's ABI instead packs the small ones tightly.
+  Since that mismatch would misalign any call whose arguments spill, the
+  backend only makes calls whose arguments stay in registers, and never
+  lets one spill onto the stack. `cmd/cocoa-smoke` builds its key events
+  with Quartz event services instead of `+[NSEvent keyEventWithType:...]`,
+  whose `BOOL` and `unsigned short` would otherwise land on the stack.
 
 Keys follow the gogpu backend on macOS: Command is the left Ctrl channel,
 Control the right one, Option is Alt, and an Option chord carries the key's

@@ -399,7 +399,26 @@ func registerCocoaClasses() error {
 				h.handleKeyDown(event)
 				return true
 			}
-			return objc.SendSuper[bool](self, cocoaSel.performKeyEquivalent, event)
+			// objc.SendSuper resolves the super class from self's dynamic
+			// class (object_getClass(self)), which is exactly what
+			// objc_msgSendSuper2 itself expects. That is safe as long as
+			// self's dynamic class is really VtuiCocoaView: the runtime
+			// then starts the search one level up, at NSView. But if this
+			// particular view instance ever gets isa-swizzled -- most
+			// commonly by Cocoa's KVO machinery, which installs a private
+			// NSKVONotifying_VtuiCocoaView subclass the moment an observer
+			// is added to it -- self's dynamic class becomes that
+			// subclass, and the same lookup would start one level up from
+			// *there*, landing back on VtuiCocoaView itself and calling
+			// straight back into this method: unbounded recursion. Guard
+			// against that by only forwarding to super while self is
+			// still exactly our own registered class; otherwise fall back
+			// to NSView's real default, which is simply to not handle the
+			// key equivalent.
+			if self.Class() == cocoaRT.classView {
+				return objc.SendSuper[bool](self, cocoaSel.performKeyEquivalent, event)
+			}
+			return false
 		}},
 		mouse("mouseDown:", uint32(vtinput.FromLeft1stButtonPressed), true),
 		mouse("mouseUp:", uint32(vtinput.FromLeft1stButtonPressed), false),
