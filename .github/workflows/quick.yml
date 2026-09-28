@@ -38,3 +38,31 @@ jobs:
       - run: go vet ./...
 
       - run: go test -count=1 -timeout 4m ./...
+
+  # golangci-lint, same version, config and flags as ci.yml's Lint job, so a
+  # finding in fresh code turns the push red here instead of failing the
+  # train PR later. A separate job runs beside the build and test, not after
+  # it, and adds no time to it. --new-from-rev needs origin/main present in
+  # the clone: fetch-depth 0 brings the full history, and the explicit fetch
+  # keeps the ref current even if checkout's defaults change.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.13.1
+          args: --new-from-rev=origin/main
