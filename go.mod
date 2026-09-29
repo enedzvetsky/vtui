@@ -54,4 +54,4 @@ replace github.com/go-webgpu/goffi => github.com/unxed/goffi v0.1.9
 
 replace github.com/ebitengine/hideconsole => ./internal/hideconsole
 
-replace github.com/neurlang/wayland => github.com/unxed/wayland v0.4.5-0.20260927204637-1d1e40619f6f
+replace github.com/neurlang/wayland => github.com/unxed/wayland v0.4.5-0.20260929195943-eab109b70429
