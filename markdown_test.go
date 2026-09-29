@@ -378,3 +378,38 @@ func TestNewMarkdownView_ShowsParsedContent(t *testing.T) {
 		t.Errorf("current topic Links = %#v", view.current.Links)
 	}
 }
+
+func TestParseMarkdownTopicMap(t *testing.T) {
+	md := "# Title\n\nFirst paragraph.\n\n```\ncode a\ncode b\n```\n\n- one\n- two\n\nLast."
+	topic, src := ParseMarkdownTopicMap("Doc", md)
+	if len(src) != len(topic.Lines) {
+		t.Fatalf("map has %d entries for %d lines", len(src), len(topic.Lines))
+	}
+	plain := ParseMarkdownTopic("Doc", md)
+	if len(plain.Lines) != len(topic.Lines) {
+		t.Fatal("ParseMarkdownTopic and ParseMarkdownTopicMap disagree")
+	}
+	for i := 1; i < len(src); i++ {
+		if src[i] < src[i-1] {
+			t.Fatalf("map goes back at %d: %v", i, src)
+		}
+	}
+	find := func(sub string) int {
+		for i, l := range topic.Lines {
+			if strings.Contains(l, sub) {
+				return i
+			}
+		}
+		t.Fatalf("no topic line with %q in %q", sub, topic.Lines)
+		return -1
+	}
+	want := map[string]int{"Title": 0, "First": 2, "code a": 5, "code b": 6, "one": 9, "two": 10, "Last.": 12}
+	for sub, line := range want {
+		if got := src[find(sub)]; got != line {
+			t.Errorf("%q comes from line %d, want %d (map %v)", sub, got, line, src)
+		}
+	}
+	if _, src := ParseMarkdownTopicMap("Empty", ""); len(src) != 1 || src[0] != 0 {
+		t.Errorf("empty document map = %v", src)
+	}
+}

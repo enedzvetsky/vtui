@@ -1,6 +1,7 @@
 package vtui
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -65,18 +66,126 @@ const markdownRuleWidth = 40
 // can display it unchanged. name becomes the topic's Name, the same role a
 // .hlf file's "@Name" line plays.
 func ParseMarkdownTopic(name, markdown string) *HelpTopic {
+	topic, _ := ParseMarkdownTopicMap(name, markdown)
+	return topic
+}
+
+// ParseMarkdownTopicMap is ParseMarkdownTopic that also says where each line
+// of the topic came from: srcLine[i] is the 0-based line of markdown that
+// topic line i was made from. A host that shows the topic beside the text (f4's
+// preview next to its editor) uses it to keep the two in step exactly.
+//
+// The map is by block: every block starts at its own first source line, and
+// the lines the block turned into are spread over the source lines up to the
+// next block (a fenced code block, whose lines are its source lines, lands
+// exactly). A blank line between blocks belongs to the block after it.
+// len(srcLine) == len(topic.Lines), and srcLine never decreases.
+func ParseMarkdownTopicMap(name, markdown string) (*HelpTopic, []int) {
 	source := []byte(markdown)
 	doc := markdownParser.Parse(text.NewReader(source))
 	r := &markdownRenderer{source: source}
-	lines := r.blocks(doc)
+	lines, srcLine := r.blocksMapped(doc)
 	if len(lines) == 0 {
-		lines = []string{""}
+		lines, srcLine = []string{""}, []int{0}
 	}
 	topic := &HelpTopic{Name: name, Lines: lines}
 	for idx, line := range lines {
 		parseHelpLinksInto(topic, line, idx)
 	}
-	return topic
+	return topic, srcLine
+}
+
+// blocksMapped is blocks for the document's top level, with the source line
+// of every line it lays out (see ParseMarkdownTopicMap).
+func (r *markdownRenderer) blocksMapped(doc gast.Node) ([]string, []int) {
+	lineStarts := []int{0}
+	for i, b := range r.source {
+		if b == '\n' {
+			lineStarts = append(lineStarts, i+1)
+		}
+	}
+	total := len(lineStarts)
+	if n := len(r.source); n > 0 && r.source[n-1] == '\n' {
+		total-- // the text ends with a newline: no line after it
+	}
+	lineOf := func(offset int) int {
+		return sort.Search(len(lineStarts), func(i int) bool { return lineStarts[i] > offset }) - 1
+	}
+	var firstLine func(n gast.Node) int
+	firstLine = func(n gast.Node) int {
+		if seg := n.Lines(); seg != nil && seg.Len() > 0 {
+			l := lineOf(seg.At(0).Start)
+			if _, ok := n.(*gast.FencedCodeBlock); ok {
+				l-- // the opening fence is a line of its own
+			}
+			return max(l, 0)
+		}
+		if t, ok := n.(*gast.Text); ok {
+			return lineOf(t.Segment.Start)
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			if l := firstLine(c); l >= 0 {
+				return l
+			}
+		}
+		return -1
+	}
+
+	type piece struct {
+		start int
+		base  int // source line of the first line when each line is a source line (code), else -1
+		lines []string
+	}
+	var pieces []piece
+	prevStart := 0
+	var prevLines []string
+	for c := doc.FirstChild(); c != nil; c = c.NextSibling() {
+		lines := r.block(c)
+		if len(lines) == 0 {
+			continue
+		}
+		start := firstLine(c)
+		if start < prevStart {
+			start = prevStart
+		}
+		if len(prevLines) > 0 && prevLines[len(prevLines)-1] != "" && markdownBlankBefore(c) {
+			pieces = append(pieces, piece{start: start, base: -1, lines: []string{""}})
+		}
+		base := -1
+		switch c.(type) {
+		case *gast.FencedCodeBlock, *gast.CodeBlock:
+			if seg := c.Lines(); seg != nil && seg.Len() > 0 {
+				base = lineOf(seg.At(0).Start)
+			}
+		}
+		pieces = append(pieces, piece{start: start, base: base, lines: lines})
+		prevStart, prevLines = start, lines
+	}
+
+	var out []string
+	var src []int
+	for i, p := range pieces {
+		end := total
+		for _, q := range pieces[i+1:] {
+			if q.start > p.start {
+				end = q.start
+				break
+			}
+		}
+		span := max(end-p.start, 1)
+		for j, l := range p.lines {
+			line := p.start + j*span/len(p.lines)
+			if p.base >= 0 {
+				line = min(p.base+j, max(total-1, 0))
+			}
+			if len(src) > 0 && line < src[len(src)-1] {
+				line = src[len(src)-1]
+			}
+			out = append(out, l)
+			src = append(src, line)
+		}
+	}
+	return out, src
 }
 
 // markdownRun is a piece of a line's text and how it is drawn.
