@@ -359,6 +359,47 @@ func TestResetFar2lNegotiation(t *testing.T) {
 	}
 }
 
+// Far2lNegotiated is the public form of the acknowledgement: false with no
+// FrameManager and before the terminal answered, true after, and false again
+// after an explicit reset and behind a native window.
+func TestFar2lNegotiated(t *testing.T) {
+	oldEnabled, oldFM := Far2lEnabled, FrameManager
+	Far2lEnabled = false
+	t.Cleanup(func() {
+		Far2lEnabled = oldEnabled
+		FrameManager = oldFM
+	})
+	withTerminalClipboard(t, false)
+
+	FrameManager = nil
+	if Far2lNegotiated() {
+		t.Fatal("negotiated with no FrameManager")
+	}
+
+	fm := &frameManager{}
+	FrameManager = fm
+	fm.Init(NewSilentScreenBuf())
+	if Far2lNegotiated() {
+		t.Fatal("negotiated before the terminal acknowledged the extensions")
+	}
+
+	fm.dispatchEvent(&vtinput.InputEvent{Type: vtinput.Far2lEventType, Far2lCommand: "ok"}, false)
+	if !Far2lNegotiated() {
+		t.Fatal("not negotiated after the acknowledgement")
+	}
+
+	ResetFar2lNegotiation()
+	if Far2lNegotiated() {
+		t.Fatal("negotiated after an explicit reset")
+	}
+
+	fm.dispatchEvent(&vtinput.InputEvent{Type: vtinput.Far2lEventType, Far2lCommand: "ok"}, false)
+	DisableTerminalClipboard()
+	if Far2lNegotiated() {
+		t.Fatal("negotiated behind a native window")
+	}
+}
+
 // ResetFar2lNegotiation is called from places that may run before any
 // FrameManager was ever set up (e.g. a session daemon reacting to a signal
 // early during startup); it must not panic on a nil manager.
