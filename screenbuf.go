@@ -834,12 +834,13 @@ type AnsiRenderer struct {
 	termCursorInvalid                bool
 	firstInit                        bool
 
-	gfxProto GraphicsProtocol
-	gfxGen   uint64
-	gfxKitty *kittyEncoder
-	gfxSixel *sixelEncoder
-	gfxFar2l *far2lEncoder
-	gfxList  []ImagePlacement
+	gfxProto  GraphicsProtocol
+	gfxGen    uint64
+	gfxKitty  *kittyEncoder
+	gfxSixel  *sixelEncoder
+	gfxITerm2 *iterm2Encoder
+	gfxFar2l  *far2lEncoder
+	gfxList   []ImagePlacement
 
 	// The application palette the previous frame was written with. Outside
 	// the 16-colour profile palette-indexed cells reach the terminal as the
