@@ -102,14 +102,14 @@ func formatAttributesCSI(buf []byte, attr, lastAttr uint64, activePal *[256]uint
 
 	revFlipped := IsFreeBSDSyscons && (attr^lastAttr)&CommonLvbReverse != 0
 
-	fgMask := IsFgRGB | (0xFF << 16)
-	if resetTriggered || revFlipped || attr&fgMask != lastAttr&fgMask || (attr&IsFgRGB != 0 && GetRGBFore(attr) != GetRGBFore(lastAttr)) {
+	fgMask := IsFgRGB | ForegroundDefault | (0xFF << 16)
+	if resetTriggered || revFlipped || attr&fgMask != lastAttr&fgMask || (attr&IsFgRGB != 0 && attr&ForegroundDefault == 0 && GetRGBFore(attr) != GetRGBFore(lastAttr)) {
 		writeSep()
 		n += writeColorANSI(buf[n:], false, attr, activePal, profile, quantCache)
 	}
 
-	bgMask := IsBgRGB | (0xFF << 40)
-	if resetTriggered || revFlipped || attr&bgMask != lastAttr&bgMask || (attr&IsBgRGB != 0 && GetRGBBack(attr) != GetRGBBack(lastAttr)) {
+	bgMask := IsBgRGB | BackgroundDefault | (0xFF << 40)
+	if resetTriggered || revFlipped || attr&bgMask != lastAttr&bgMask || (attr&IsBgRGB != 0 && attr&BackgroundDefault == 0 && GetRGBBack(attr) != GetRGBBack(lastAttr)) {
 		writeSep()
 		n += writeColorANSI(buf[n:], true, attr, activePal, profile, quantCache)
 	}
@@ -130,6 +130,14 @@ func writeColorANSI(dst []byte, isBg bool, attr uint64, activePal *[256]uint32, 
 	src := isBg
 	if IsFreeBSDSyscons && attr&CommonLvbReverse != 0 {
 		src = !src
+	}
+
+	// The terminal's own default colour: SGR 39 / 49, whatever the profile.
+	if src && attr&BackgroundDefault != 0 || !src && attr&ForegroundDefault != 0 {
+		if isBg {
+			return copy(dst, "49")
+		}
+		return copy(dst, "39")
 	}
 
 	var rgbVal uint32

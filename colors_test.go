@@ -57,3 +57,49 @@ func TestDimColor(t *testing.T) {
 		t.Errorf("DimColor Index failed, got %d", GetIndexFore(dimmedIdx))
 	}
 }
+
+func TestDefaultColorAttributes(t *testing.T) {
+	base := SetIndexBoth(0, 2, 4)
+	both := SetDefaultBack(SetDefaultFore(base))
+	if both&ForegroundDefault == 0 || both&BackgroundDefault == 0 {
+		t.Fatalf("default flags not set: %#x", both)
+	}
+	// Readers that cannot express "default" keep seeing an ordinary index.
+	if GetIndexFore(both) != 7 || GetIndexBack(both) != 0 || both&(IsFgRGB|IsBgRGB) != 0 {
+		t.Errorf("default attr reads as fg %d bg %d", GetIndexFore(both), GetIndexBack(both))
+	}
+	// Any other colour setter leaves "default".
+	if a := SetIndexFore(both, 3); a&ForegroundDefault != 0 || a&BackgroundDefault == 0 {
+		t.Errorf("SetIndexFore: %#x", a)
+	}
+	if a := SetRGBBack(both, 0x102030); a&BackgroundDefault != 0 || a&ForegroundDefault == 0 {
+		t.Errorf("SetRGBBack: %#x", a)
+	}
+	if a := SetRGBBoth(both, 1, 2); a&(ForegroundDefault|BackgroundDefault) != 0 {
+		t.Errorf("SetRGBBoth: %#x", a)
+	}
+	// Inversion moves the flag with its colour.
+	inv := InvertColors(SetDefaultBack(SetIndexFore(0, 5)))
+	if inv&ForegroundDefault == 0 || inv&BackgroundDefault != 0 || GetIndexBack(inv) != 5 {
+		t.Errorf("InvertColors: %#x", inv)
+	}
+}
+
+func TestDefaultColorANSI(t *testing.T) {
+	def := SetDefaultBack(SetDefaultFore(0))
+	for _, profile := range []ColorProfile{ColorProfile16, ColorProfile256, ColorProfileTrueColor} {
+		if got := attributesToANSI(def, SetIndexBoth(0, 1, 2), nil, profile, nil); got != "\x1b[39;49m" {
+			t.Errorf("profile %v: default over index = %q", profile, got)
+		}
+		if got := attributesToANSI(SetIndexBoth(0, 1, 2), def, nil, profile, nil); got == "" || got == "\x1b[39;49m" {
+			t.Errorf("profile %v: index over default = %q, want explicit colours", profile, got)
+		}
+		if got := attributesToANSI(def, def, nil, profile, nil); got != "" {
+			t.Errorf("profile %v: unchanged default = %q", profile, got)
+		}
+	}
+	// Only the background changes to default.
+	if got := attributesToANSI(SetDefaultBack(SetIndexFore(0, 1)), SetIndexBoth(0, 1, 2), nil, ColorProfileTrueColor, nil); got != "\x1b[49m" {
+		t.Errorf("background alone = %q", got)
+	}
+}
