@@ -150,6 +150,29 @@ func (hv *HelpView) applyTopic(topic *HelpTopic) {
 // has to read them from here and not from the topic the engine holds.
 func (hv *HelpView) CurrentTopic() *HelpTopic { return hv.current }
 
+// ScrollTop is how many scrolling rows of the topic lie above the top of the
+// text (the sticky header rows, which never scroll, are not counted).
+func (hv *HelpView) ScrollTop() int { return hv.scrollTop }
+
+// SetScrollTop scrolls the text so that row n of the scrolling part of the
+// topic is at the top, within what can be scrolled to. A host that keeps the
+// view in step with something else (f4's Markdown preview beside its editor)
+// uses it instead of turning the wheel.
+func (hv *HelpView) SetScrollTop(n int) {
+	hv.scrollBy(n - hv.scrollTop)
+}
+
+// SourceRow is the row of the source topic (before long lines were broken at
+// spaces) that row of CurrentTopic().Lines was cut from, and false when row is
+// out of range. It lets a host map a place on screen back to the text it came
+// from.
+func (hv *HelpView) SourceRow(row int) (int, bool) {
+	if row < 0 || row >= len(hv.rowSrc) {
+		return 0, false
+	}
+	return hv.rowSrc[row], true
+}
+
 // rewrapOnResize breaks the topic again when the window has become wider or
 // narrower (zoom, a resized terminal), and keeps the reader at the same place
 // in the text and on the same link.
