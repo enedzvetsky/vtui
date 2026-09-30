@@ -318,9 +318,9 @@
     },
     "Canvas": {
       "extends": "Widget",
-      "summary": "Pixel-buffer drawing surface with pointer input",
+      "summary": "RGBA image placement over the terminal cell grid",
       "properties": {},
-      "signals": ["paint", "mouseDown", "mouseUp", "mouseMove", "mouseWheel"],
+      "signals": [],
       "sizeHint": { "w": 40, "h": 12 },
       "minSize": { "w": 1, "h": 1 },
       "sizePolicy": { "h": "expanding", "v": "expanding" }

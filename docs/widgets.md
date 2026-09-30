@@ -54,7 +54,7 @@ Action push button
 
 ### `Canvas`
 
-Pixel-buffer drawing surface with pointer input
+RGBA image placement over the terminal cell grid
 
 *Inherits:* `Widget`
 
@@ -62,8 +62,6 @@ Pixel-buffer drawing surface with pointer input
 - `sizeHint`: 40 × 12 cells
 - `minSize`: 1 × 1 cells
 - `sizePolicy`: h=`expanding`, v=`expanding`
-
-**Signals:** `paint`, `mouseDown`, `mouseUp`, `mouseMove`, `mouseWheel`
 
 ---
 
