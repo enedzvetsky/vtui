@@ -52,6 +52,21 @@ Action push button
 
 ---
 
+### `Canvas`
+
+Pixel-buffer drawing surface with pointer input
+
+*Inherits:* `Widget`
+
+**Default Geometry:**
+- `sizeHint`: 40 × 12 cells
+- `minSize`: 1 × 1 cells
+- `sizePolicy`: h=`expanding`, v=`expanding`
+
+**Signals:** `paint`, `mouseDown`, `mouseUp`, `mouseMove`, `mouseWheel`
+
+---
+
 ### `CheckGroup`
 
 Independent checkbox cluster in a grid
