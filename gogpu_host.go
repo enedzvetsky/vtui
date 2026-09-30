@@ -116,6 +116,18 @@ func (host *GogpuHost) mouseRelease(_ gpucontext.MouseButton, x, y float64) {
 	})
 }
 
+// clampCell narrows a cell coordinate to the int16 the mouse event carries; a
+// pointer dragged far outside the window saturates instead of wrapping.
+func clampCell(v int) int16 {
+	switch {
+	case v > math.MaxInt16:
+		return math.MaxInt16
+	case v < math.MinInt16:
+		return math.MinInt16
+	}
+	return int16(v) //nolint:gosec // range checked above
+}
+
 // mouseMove reports pointer motion, once for each cell the pointer enters.
 func (host *GogpuHost) mouseMove(x, y float64) {
 	host.mu.Lock()
@@ -139,8 +151,8 @@ func (host *GogpuHost) mouseMove(x, y float64) {
 	}
 	host.sendEvent(&vtinput.InputEvent{
 		Type:            vtinput.MouseEventType,
-		MouseX:          int16(cellX),
-		MouseY:          int16(cellY),
+		MouseX:          clampCell(cellX),
+		MouseY:          clampCell(cellY),
 		MouseEventFlags: vtinput.MouseMoved,
 		ButtonState:     btn,
 		ControlKeyState: mods,

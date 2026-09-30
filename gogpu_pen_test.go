@@ -100,3 +100,11 @@ func TestGogpuHostPenPointerDrivesTheMouseHandling(t *testing.T) {
 		t.Fatalf("a mouse pointer reported %+v", ev)
 	}
 }
+
+func TestClampCellSaturatesInsteadOfWrapping(t *testing.T) {
+	for in, want := range map[int]int16{0: 0, 12: 12, -5: -5, 40000: 32767, -40000: -32768, 1 << 40: 32767} {
+		if got := clampCell(in); got != want {
+			t.Errorf("clampCell(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
