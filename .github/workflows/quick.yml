@@ -37,7 +37,9 @@ jobs:
 
       - run: go vet ./...
 
-      - run: go test -count=1 -timeout 4m ./...
+      # Shuffled, so a test that leans on state another test left behind fails
+      # here, with its seed printed, and not only on someone else's machine.
+      - run: go test -count=1 -shuffle=on -timeout 4m ./...
 
   # golangci-lint, same version, config and flags as ci.yml's Lint job, so a
   # finding in fresh code turns the push red here instead of failing the
