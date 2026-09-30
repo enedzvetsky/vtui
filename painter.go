@@ -64,7 +64,7 @@ func (p *Painter) DrawTitle(x1, y1, x2 int, title string, attr uint64) {
 
 // DrawCloseButton draws the [x] button on the top right.
 func (p *Painter) DrawCloseButton(x2, y1 int, offset int, attr uint64) {
-	closeStr := string(UIStrings.CloseBrackets[0]) + string(UIStrings.CloseSymbol) + string(UIStrings.CloseBrackets[1])
+	closeStr := string(UIStrings.CloseBrackets[0]) + string(EffectiveCloseSymbol()) + string(UIStrings.CloseBrackets[1])
 	p.scr.Write(x2-offset, y1, StringToCharInfo(closeStr, attr))
 }
 
