@@ -1057,6 +1057,7 @@ func (e *Edit) OpenHistory() {
 	if w < 20 {
 		w = 20
 	}
+	menu.TruncateMark = ">"
 
 	// Positioning logic
 	scrH := 25

@@ -18,4 +18,7 @@ func TestEdit_HistoryDropdownMatchesTheFieldWidth(t *testing.T) {
 	if x1 != 5 || x2 != 5+59 {
 		t.Fatalf("history menu spans %d..%d, want the field's 5..64", x1, x2)
 	}
+	if top.TruncateMark != ">" {
+		t.Fatalf("truncate mark %q, want >", top.TruncateMark)
+	}
 }

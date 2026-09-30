@@ -58,8 +58,10 @@ type VMenu struct {
 	// box, under a separator, that show the selected item's Description.
 	bottomTextLines int
 	Items           []MenuItem
-	done            bool
-	exitCode        int
+	// TruncateMark ends an item cut to the width of the menu; "…" when empty.
+	TruncateMark string
+	done         bool
+	exitCode     int
 	// selectAtOpen is SelectPos as of the last ClearDone. Browsing moves
 	// SelectPos live (arrows, mouse hover), so cancelling has to put it
 	// back: dialogs read SelectPos as the confirmed choice, and without the
@@ -856,7 +858,11 @@ func (m *VMenu) DisplayObject(scr *ScreenBuf) {
 		// ellipsis; the accent letter of a cut item is not drawn.
 		avail := m.X2 - textX - vLenHint
 		if clean, _, _ := ParseAmpersandString(item.Text); StringWidth(clean) > avail {
-			p.DrawString(textX, currY, TruncateString(clean, avail, "…"), itemAttr)
+			mark := m.TruncateMark
+			if mark == "" {
+				mark = "…"
+			}
+			p.DrawString(textX, currY, TruncateString(clean, avail, mark), itemAttr)
 		} else {
 			p.DrawControlText(textX, currY, item.Text, itemAttr, hiAttr)
 		}
