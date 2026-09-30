@@ -512,6 +512,13 @@ func TestAnsiRenderer_RuneWriting(t *testing.T) {
 }
 
 func TestAnsiRenderer_FreeBSDConsoleAvoidsPrivateModesAndOSC(t *testing.T) {
+	// The cursor colour the terminal was last sent is package-wide state that
+	// Suspend in other tests leaves as "unknown"; with it pending, the frame
+	// carries an OSC 112 this test is about to forbid. Start from a colour that
+	// has been sent.
+	cursorColorTestState(t)
+	cursorColorSent = CursorColor
+
 	oldFreeBSDConsole := IsFreeBSDConsole
 	IsFreeBSDConsole = true
 	defer func() { IsFreeBSDConsole = oldFreeBSDConsole }()
