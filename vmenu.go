@@ -849,17 +849,7 @@ func (m *VMenu) DisplayObject(scr *ScreenBuf) {
 			p.DrawString(textX, currY, item.AccentPrefix, hiAttr)
 			textX += runewidth.StringWidth(item.AccentPrefix)
 		}
-		// The text must not run past the box: a name longer than the menu (a
-		// combo box drop-down of long font names on a narrow console, f4 #1706)
-		// would otherwise be painted over the border, the scrollbar and
-		// whatever is beside the menu. What does not fit is cut with an
-		// ellipsis; the accent letter of a cut item is not drawn.
-		avail := m.X2 - textX - vLenHint
-		if clean, _, _ := ParseAmpersandString(item.Text); StringWidth(clean) > avail {
-			p.DrawString(textX, currY, TruncateString(clean, avail, "…"), itemAttr)
-		} else {
-			p.DrawControlText(textX, currY, item.Text, itemAttr, hiAttr)
-		}
+		p.DrawControlText(textX, currY, item.Text, itemAttr, hiAttr)
 		if hintText != "" {
 			p.DrawString(m.X2-vLenHint, currY, hintText, itemAttr)
 		}
