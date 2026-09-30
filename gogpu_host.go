@@ -29,6 +29,46 @@ var (
 // key belongs to the OS and must stay out of the application's way.
 var gogpuCmdIsCtrl = runtime.GOOS == "darwin"
 
+// gogpuPenIsSeparate is whether the platform layer reports a pen only as a pen
+// pointer, never also as a mouse one (macOS does: the subtype of the NSEvent
+// decides which). Elsewhere the operating system may synthesise mouse events for
+// a pen as well, and forwarding the pen pointer would send every press twice.
+var gogpuPenIsSeparate = runtime.GOOS == "darwin"
+
+type penAction uint8
+
+const (
+	penPress penAction = iota
+	penRelease
+	penMove
+)
+
+// penPointerAction maps a pen pointer event to the mouse action it stands for.
+// Mouse and touch pointers return ok false: the first already reaches the mouse
+// callbacks, the second is left to the operating system's own mouse emulation.
+// The pen's barrel button arrives as the right button, as macOS reports it.
+func penPointerAction(ev gpucontext.PointerEvent) (penAction, gpucontext.MouseButton, bool) {
+	if ev.PointerType != gpucontext.PointerTypePen {
+		return 0, 0, false
+	}
+	button := gpucontext.MouseButtonLeft
+	switch ev.Button {
+	case gpucontext.ButtonRight:
+		button = gpucontext.MouseButtonRight
+	case gpucontext.ButtonMiddle:
+		button = gpucontext.MouseButtonMiddle
+	}
+	switch ev.Type {
+	case gpucontext.PointerDown:
+		return penPress, button, true
+	case gpucontext.PointerUp:
+		return penRelease, button, true
+	case gpucontext.PointerMove:
+		return penMove, 0, true
+	}
+	return 0, 0, false
+}
+
 // gogpuAltComposesText says the platform makes a chord type a character of its
 // own instead of leaving the key its own.
 //
@@ -642,7 +682,7 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 		})
 	})
 
-	app.EventSource().OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
+	onMousePress := func(button gpucontext.MouseButton, x, y float64) {
 		var btn uint32
 		switch button {
 		case gpucontext.MouseButtonLeft:
@@ -668,9 +708,10 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 			KeyDown:     true,
 			ButtonState: btn,
 		})
-	})
+	}
+	app.EventSource().OnMousePress(onMousePress)
 
-	app.EventSource().OnMouseRelease(func(button gpucontext.MouseButton, x, y float64) {
+	onMouseRelease := func(button gpucontext.MouseButton, x, y float64) {
 		host.mu.Lock()
 		host.mouseBtn = 0
 		cW := host.cellW
@@ -684,9 +725,10 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 			KeyDown:     false,
 			ButtonState: 0,
 		})
-	})
+	}
+	app.EventSource().OnMouseRelease(onMouseRelease)
 
-	app.EventSource().OnMouseMove(func(x, y float64) {
+	onMouseMove := func(x, y float64) {
 		host.mu.Lock()
 		btn := host.mouseBtn
 		cW := host.cellW
@@ -714,7 +756,30 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 			ButtonState:     btn,
 			ControlKeyState: mods,
 		})
-	})
+	}
+	app.EventSource().OnMouseMove(onMouseMove)
+
+	// gogpu reports a stylus as a pen pointer and hands the legacy mouse
+	// callbacks only to mouse-type pointers ("to avoid duplicates from
+	// touch/pen"), so on macOS a Wacom pen moved the cursor (its hover arrives
+	// as mouse moves) and could not click (unxed/f4#1689). The pen pointer
+	// events are turned into the same button and motion events here.
+	if pointers, ok := app.EventSource().(gpucontext.PointerEventSource); ok && gogpuPenIsSeparate {
+		pointers.OnPointer(func(ev gpucontext.PointerEvent) {
+			kind, button, ok := penPointerAction(ev)
+			if !ok {
+				return
+			}
+			switch kind {
+			case penPress:
+				onMousePress(button, ev.X, ev.Y)
+			case penRelease:
+				onMouseRelease(button, ev.X, ev.Y)
+			case penMove:
+				onMouseMove(ev.X, ev.Y)
+			}
+		})
+	}
 
 	app.EventSource().OnScroll(func(dx float64, dy float64) {
 		host.mu.Lock()
