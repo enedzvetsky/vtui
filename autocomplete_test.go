@@ -38,7 +38,9 @@ func TestAutoComplete_IsBusyInheritance(t *testing.T) {
 	SetDefaultPalette()
 	fm := NewFrameManager()
 	fm.Init(NewSilentScreenBuf())
+	savedFM := FrameManager
 	FrameManager = fm
+	t.Cleanup(func() { FrameManager = savedFM })
 
 	busyUnder := &busyFrame{Busy: true}
 	fm.Push(busyUnder)

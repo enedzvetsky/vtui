@@ -154,6 +154,14 @@ func TestParseMarkdownTopic_CodeBlockTabsExpanded(t *testing.T) {
 func TestMarkdownView_CodeBlockHashDrawnAsText(t *testing.T) {
 	// The regression of f4#1625 at the level the reader sees: the cells
 	// HelpView draws, not only the markup.
+	//
+	// NewHelpView sizes itself to the global FrameManager's screen when there
+	// is one, and wraps the topic to that width. A test that left a narrow
+	// FrameManager behind used to cut this line short ("    # comment"), but
+	// only when it ran first; this one wants the default, unwrapped view.
+	savedFM := FrameManager
+	FrameManager = nil
+	t.Cleanup(func() { FrameManager = savedFM })
 	view := NewMarkdownView("Doc", "```\n# comment ~x~y@ z\n```")
 	line := view.current.Lines[0]
 	scr := NewScreenBuf()
