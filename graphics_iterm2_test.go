@@ -166,3 +166,20 @@ func TestITerm2ForcedRedrawStartsFromNothing(t *testing.T) {
 		t.Error("a forced redraw did not send the picture again")
 	}
 }
+
+// A source larger than the cells in one direction only is sent as it is: the
+// terminal stretches it, and shrinking one side alone would distort it.
+func TestITerm2ShrinksOnlyWhenBothSidesAreLarger(t *testing.T) {
+	var out bytes.Buffer
+	wide := iterm2Solid(400, 10, 1, 2, 3) // wider than 5 cells of 8 px, but shorter than 2 rows of 16
+	newITerm2Encoder().Render(&out, []ImagePlacement{{Surface: wide, Cols: 5, Rows: 2}}, 8, 16)
+	if _, _, img := decodeITerm2(t, out.String()); img.Bounds().Dx() != 400 || img.Bounds().Dy() != 10 {
+		t.Errorf("a source larger in one direction only was resized to %v", img.Bounds())
+	}
+	out.Reset()
+	tall := iterm2Solid(10, 400, 1, 2, 3)
+	newITerm2Encoder().Render(&out, []ImagePlacement{{Surface: tall, Cols: 5, Rows: 2}}, 8, 16)
+	if _, _, img := decodeITerm2(t, out.String()); img.Bounds().Dx() != 10 || img.Bounds().Dy() != 400 {
+		t.Errorf("a source taller only was resized to %v", img.Bounds())
+	}
+}
