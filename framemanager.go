@@ -212,6 +212,9 @@ func (s *AppScreen) NeedsAttention() bool {
 
 // frameManager manages multiple screens and the main application loop.
 type frameManager struct {
+	// renderLogCount paces the debug line of renderPhase: the first render and
+	// then one in every renderLogEvery, whatever the clock says.
+	renderLogCount    uint
 	Screens           []*AppScreen
 	ActiveIdx         int
 	activationHistory []*AppScreen
@@ -2664,14 +2667,20 @@ func (fm *frameManager) Run(readers ...*vtinput.Reader) {
 	}
 }
 
+// renderLogEvery is how many renders pass between two debug lines.
+const renderLogEvery = 300
+
 func (fm *frameManager) renderPhase() {
 	if len(fm.frames) == 0 {
 		return
 	}
 	renderPhaseStart := time.Now()
 	if fm.scr != nil && fm.scr.Renderer != nil {
-		// Only log periodically to avoid performance hit
-		if (time.Now().UnixMilli()/1000)%5 == 0 {
+		// Only log periodically to avoid performance hit. A counter, not the
+		// wall clock: which second a render fell in decided whether this line
+		// ran, and with it the coverage of the package from run to run.
+		fm.renderLogCount++
+		if fm.renderLogCount%renderLogEvery == 1 {
 			DebugLog("FM: renderPhase() for screen %dx%d, stack depth: %d, top frame: %q",
 				fm.scr.width, fm.scr.height, len(fm.frames), fm.frames[len(fm.frames)-1].GetTitle())
 		}
