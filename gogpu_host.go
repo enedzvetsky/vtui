@@ -69,6 +69,101 @@ func penPointerAction(ev gpucontext.PointerEvent) (penAction, gpucontext.MouseBu
 	return 0, 0, false
 }
 
+// mousePress reports a button going down at pixel (x, y) as a mouse event in
+// cells, and remembers the button for the motion that follows.
+func (host *GogpuHost) mousePress(button gpucontext.MouseButton, x, y float64) {
+	var btn uint32
+	switch button {
+	case gpucontext.MouseButtonLeft:
+		btn = uint32(vtinput.FromLeft1stButtonPressed)
+	case gpucontext.MouseButtonRight:
+		btn = uint32(vtinput.RightmostButtonPressed)
+	case gpucontext.MouseButtonMiddle:
+		btn = uint32(vtinput.FromLeft2ndButtonPressed)
+	default:
+		btn = uint32(vtinput.FromLeft1stButtonPressed)
+	}
+
+	host.mu.Lock()
+	host.mouseBtn = btn
+	cW := host.cellW
+	cH := host.cellH
+	host.mu.Unlock()
+
+	host.sendEvent(&vtinput.InputEvent{
+		Type:        vtinput.MouseEventType,
+		MouseX:      int16(x / float64(cW)),
+		MouseY:      int16(y / float64(cH)),
+		KeyDown:     true,
+		ButtonState: btn,
+	})
+}
+
+// mouseRelease reports the button coming up at pixel (x, y).
+func (host *GogpuHost) mouseRelease(_ gpucontext.MouseButton, x, y float64) {
+	host.mu.Lock()
+	host.mouseBtn = 0
+	cW := host.cellW
+	cH := host.cellH
+	host.mu.Unlock()
+
+	host.sendEvent(&vtinput.InputEvent{
+		Type:        vtinput.MouseEventType,
+		MouseX:      int16(x / float64(cW)),
+		MouseY:      int16(y / float64(cH)),
+		KeyDown:     false,
+		ButtonState: 0,
+	})
+}
+
+// mouseMove reports pointer motion, once for each cell the pointer enters.
+func (host *GogpuHost) mouseMove(x, y float64) {
+	host.mu.Lock()
+	btn := host.mouseBtn
+	cW := host.cellW
+	cH := host.cellH
+	mods := host.currentMods
+	cellX, cellY := int(x/float64(cW)), int(y/float64(cH))
+	moved := !host.mouseCellKnown || cellX != host.lastMouseCellX || cellY != host.lastMouseCellY
+	host.lastMouseCellX, host.lastMouseCellY = cellX, cellY
+	host.mouseCellKnown = true
+	host.mu.Unlock()
+
+	// Motion is reported per cell, whether or not a button is held:
+	// the terminal, the viewer and the editor underline the URL under
+	// the pointer (f4 #459) and need hover motion for that, exactly as
+	// the tty backend delivers it through any-event tracking (?1003).
+	// Coalescing by cell keeps a fast sweep from flooding the queue.
+	if !moved {
+		return
+	}
+	host.sendEvent(&vtinput.InputEvent{
+		Type:            vtinput.MouseEventType,
+		MouseX:          int16(cellX),
+		MouseY:          int16(cellY),
+		MouseEventFlags: vtinput.MouseMoved,
+		ButtonState:     btn,
+		ControlKeyState: mods,
+	})
+}
+
+// penPointer turns a pen pointer event into the mouse handling of the same
+// action; other pointers are left to the mouse callbacks.
+func (host *GogpuHost) penPointer(ev gpucontext.PointerEvent) {
+	kind, button, ok := penPointerAction(ev)
+	if !ok {
+		return
+	}
+	switch kind {
+	case penPress:
+		host.mousePress(button, ev.X, ev.Y)
+	case penRelease:
+		host.mouseRelease(button, ev.X, ev.Y)
+	case penMove:
+		host.mouseMove(ev.X, ev.Y)
+	}
+}
+
 // gogpuAltComposesText says the platform makes a chord type a character of its
 // own instead of leaving the key its own.
 //
@@ -682,82 +777,11 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 		})
 	})
 
-	onMousePress := func(button gpucontext.MouseButton, x, y float64) {
-		var btn uint32
-		switch button {
-		case gpucontext.MouseButtonLeft:
-			btn = uint32(vtinput.FromLeft1stButtonPressed)
-		case gpucontext.MouseButtonRight:
-			btn = uint32(vtinput.RightmostButtonPressed)
-		case gpucontext.MouseButtonMiddle:
-			btn = uint32(vtinput.FromLeft2ndButtonPressed)
-		default:
-			btn = uint32(vtinput.FromLeft1stButtonPressed)
-		}
+	app.EventSource().OnMousePress(host.mousePress)
 
-		host.mu.Lock()
-		host.mouseBtn = btn
-		cW := host.cellW
-		cH := host.cellH
-		host.mu.Unlock()
+	app.EventSource().OnMouseRelease(host.mouseRelease)
 
-		host.sendEvent(&vtinput.InputEvent{
-			Type:        vtinput.MouseEventType,
-			MouseX:      int16(x / float64(cW)),
-			MouseY:      int16(y / float64(cH)),
-			KeyDown:     true,
-			ButtonState: btn,
-		})
-	}
-	app.EventSource().OnMousePress(onMousePress)
-
-	onMouseRelease := func(button gpucontext.MouseButton, x, y float64) {
-		host.mu.Lock()
-		host.mouseBtn = 0
-		cW := host.cellW
-		cH := host.cellH
-		host.mu.Unlock()
-
-		host.sendEvent(&vtinput.InputEvent{
-			Type:        vtinput.MouseEventType,
-			MouseX:      int16(x / float64(cW)),
-			MouseY:      int16(y / float64(cH)),
-			KeyDown:     false,
-			ButtonState: 0,
-		})
-	}
-	app.EventSource().OnMouseRelease(onMouseRelease)
-
-	onMouseMove := func(x, y float64) {
-		host.mu.Lock()
-		btn := host.mouseBtn
-		cW := host.cellW
-		cH := host.cellH
-		mods := host.currentMods
-		cellX, cellY := int(x/float64(cW)), int(y/float64(cH))
-		moved := !host.mouseCellKnown || cellX != host.lastMouseCellX || cellY != host.lastMouseCellY
-		host.lastMouseCellX, host.lastMouseCellY = cellX, cellY
-		host.mouseCellKnown = true
-		host.mu.Unlock()
-
-		// Motion is reported per cell, whether or not a button is held:
-		// the terminal, the viewer and the editor underline the URL under
-		// the pointer (f4 #459) and need hover motion for that, exactly as
-		// the tty backend delivers it through any-event tracking (?1003).
-		// Coalescing by cell keeps a fast sweep from flooding the queue.
-		if !moved {
-			return
-		}
-		host.sendEvent(&vtinput.InputEvent{
-			Type:            vtinput.MouseEventType,
-			MouseX:          int16(cellX),
-			MouseY:          int16(cellY),
-			MouseEventFlags: vtinput.MouseMoved,
-			ButtonState:     btn,
-			ControlKeyState: mods,
-		})
-	}
-	app.EventSource().OnMouseMove(onMouseMove)
+	app.EventSource().OnMouseMove(host.mouseMove)
 
 	// gogpu reports a stylus as a pen pointer and hands the legacy mouse
 	// callbacks only to mouse-type pointers ("to avoid duplicates from
@@ -765,20 +789,7 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 	// as mouse moves) and could not click (unxed/f4#1689). The pen pointer
 	// events are turned into the same button and motion events here.
 	if pointers, ok := app.EventSource().(gpucontext.PointerEventSource); ok && gogpuPenIsSeparate {
-		pointers.OnPointer(func(ev gpucontext.PointerEvent) {
-			kind, button, ok := penPointerAction(ev)
-			if !ok {
-				return
-			}
-			switch kind {
-			case penPress:
-				onMousePress(button, ev.X, ev.Y)
-			case penRelease:
-				onMouseRelease(button, ev.X, ev.Y)
-			case penMove:
-				onMouseMove(ev.X, ev.Y)
-			}
-		})
+		pointers.OnPointer(host.penPointer)
 	}
 
 	app.EventSource().OnScroll(func(dx float64, dy float64) {
