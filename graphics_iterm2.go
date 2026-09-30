@@ -65,12 +65,14 @@ func (e *iterm2Encoder) Render(sb kittyBuffer, list []ImagePlacement, cw, ch int
 				e.order = e.order[1:]
 			}
 		}
-		sb.WriteString("\x1b[")
+		// The frame buffer's writes cannot fail; the results are dropped
+		// explicitly for errcheck.
+		_, _ = sb.WriteString("\x1b[")
 		sixelWriteCoord(sb, p.Row+1)
-		sb.WriteByte(';')
+		_ = sb.WriteByte(';')
 		sixelWriteCoord(sb, p.Col+1)
-		sb.WriteByte('H')
-		sb.WriteString(seq)
+		_ = sb.WriteByte('H')
+		_, _ = sb.WriteString(seq)
 	}
 }
 
