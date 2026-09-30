@@ -154,6 +154,14 @@ func TestParseMarkdownTopic_CodeBlockTabsExpanded(t *testing.T) {
 func TestMarkdownView_CodeBlockHashDrawnAsText(t *testing.T) {
 	// The regression of f4#1625 at the level the reader sees: the cells
 	// HelpView draws, not only the markup.
+	//
+	// NewHelpView sizes itself to the global FrameManager's screen when there
+	// is one, and wraps the topic to that width. A test that left a narrow
+	// FrameManager behind used to cut this line short ("    # comment"), but
+	// only when it ran first; this one wants the default, unwrapped view.
+	savedFM := FrameManager
+	FrameManager = nil
+	t.Cleanup(func() { FrameManager = savedFM })
 	view := NewMarkdownView("Doc", "```\n# comment ~x~y@ z\n```")
 	line := view.current.Lines[0]
 	scr := NewScreenBuf()
@@ -411,5 +419,22 @@ func TestParseMarkdownTopicMap(t *testing.T) {
 	}
 	if _, src := ParseMarkdownTopicMap("Empty", ""); len(src) != 1 || src[0] != 0 {
 		t.Errorf("empty document map = %v", src)
+	}
+}
+
+// A Markdown view built while a FrameManager with a screen exists sizes itself
+// to that screen, centred, the way every HelpView does.
+func TestNewMarkdownView_SizesItselfToTheFrameManagerScreen(t *testing.T) {
+	savedFM := FrameManager
+	t.Cleanup(func() { FrameManager = savedFM })
+	scr := NewScreenBuf()
+	scr.AllocBuf(100, 30)
+	fm := NewFrameManager()
+	fm.Init(scr)
+	FrameManager = fm
+
+	view := NewMarkdownView("Doc", "text")
+	if view.X1 != 12 || view.Y1 != 2 || view.X2 != 87 || view.Y2 != 27 {
+		t.Errorf("view at (%d,%d)-(%d,%d), want (12,2)-(87,27)", view.X1, view.Y1, view.X2, view.Y2)
 	}
 }
