@@ -1050,13 +1050,12 @@ func (e *Edit) OpenHistory() {
 		h = 10
 	}
 
-	// Calculate width: at least the width of the input field, but max 50
+	// The list is as wide as the input field it drops from, so a long entry
+	// never reaches past the field's own edge (f4 #891); a field too narrow
+	// to read an entry in still gets 20 columns.
 	w := e.X2 - e.X1 + 1
 	if w < 20 {
 		w = 20
-	}
-	if w > 50 {
-		w = 50
 	}
 
 	// Positioning logic
