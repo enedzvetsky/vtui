@@ -421,3 +421,20 @@ func TestParseMarkdownTopicMap(t *testing.T) {
 		t.Errorf("empty document map = %v", src)
 	}
 }
+
+// A Markdown view built while a FrameManager with a screen exists sizes itself
+// to that screen, centred, the way every HelpView does.
+func TestNewMarkdownView_SizesItselfToTheFrameManagerScreen(t *testing.T) {
+	savedFM := FrameManager
+	t.Cleanup(func() { FrameManager = savedFM })
+	scr := NewScreenBuf()
+	scr.AllocBuf(100, 30)
+	fm := NewFrameManager()
+	fm.Init(scr)
+	FrameManager = fm
+
+	view := NewMarkdownView("Doc", "text")
+	if view.X1 != 12 || view.Y1 != 2 || view.X2 != 87 || view.Y2 != 27 {
+		t.Errorf("view at (%d,%d)-(%d,%d), want (12,2)-(87,27)", view.X1, view.Y1, view.X2, view.Y2)
+	}
+}
