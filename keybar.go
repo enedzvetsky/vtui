@@ -22,6 +22,14 @@ type KeySet struct {
 	Ctrl   KeyBarLabels
 	Alt    KeyBarLabels
 
+	// CtrlShift, AltShift and CtrlAlt are the rows shown while two modifiers
+	// are held together. A row with no label at all is treated as absent and
+	// the bar falls back to the single-modifier row (Shift, then Ctrl, then
+	// Alt), so a caller that never fills them keeps behaving as before.
+	CtrlShift KeyBarLabels
+	AltShift  KeyBarLabels
+	CtrlAlt   KeyBarLabels
+
 	// NormalDisabled, ShiftDisabled, CtrlDisabled and AltDisabled parallel
 	// Normal, Shift, Ctrl and Alt one slot at a time. Left at the zero value
 	// (all false), nothing is dimmed, so a caller that never heard of this
@@ -30,6 +38,12 @@ type KeySet struct {
 	ShiftDisabled  KeyBarDisabled
 	CtrlDisabled   KeyBarDisabled
 	AltDisabled    KeyBarDisabled
+
+	// CtrlShiftDisabled, AltShiftDisabled and CtrlAltDisabled parallel the
+	// combined rows the same way.
+	CtrlShiftDisabled KeyBarDisabled
+	AltShiftDisabled  KeyBarDisabled
+	CtrlAltDisabled   KeyBarDisabled
 }
 
 // KeyBar implements the bottom row of function key hints.
@@ -40,6 +54,11 @@ type KeyBar struct {
 	Ctrl   KeyBarLabels
 	Alt    KeyBarLabels
 
+	// CtrlShift, AltShift and CtrlAlt are the KeySet rows of the same name.
+	CtrlShift KeyBarLabels
+	AltShift  KeyBarLabels
+	CtrlAlt   KeyBarLabels
+
 	// NormalDisabled, ShiftDisabled, CtrlDisabled and AltDisabled are the
 	// KeySet fields of the same name, copied over alongside the labels
 	// (see framemanager.go's KeyBar sync). DisplayObject dims a slot's label
@@ -48,6 +67,10 @@ type KeyBar struct {
 	ShiftDisabled  KeyBarDisabled
 	CtrlDisabled   KeyBarDisabled
 	AltDisabled    KeyBarDisabled
+
+	CtrlShiftDisabled KeyBarDisabled
+	AltShiftDisabled  KeyBarDisabled
+	CtrlAltDisabled   KeyBarDisabled
 
 	shiftState bool
 	ctrlState  bool
@@ -139,23 +162,42 @@ func (kb *KeyBar) ProcessMouse(e *vtinput.InputEvent) bool {
 	return false
 }
 
+// activeRow picks the row for the modifiers held now: a combined row when two
+// modifiers are down and the caller supplied it, otherwise the first of
+// Shift, Ctrl, Alt that is down, otherwise Normal. The third result names the
+// row ("normal", "shift", "ctrl", "alt", "ctrl+shift", "alt+shift", "ctrl+alt").
+func (kb *KeyBar) activeRow() (KeyBarLabels, KeyBarDisabled, string) {
+	rowUsed := func(l KeyBarLabels) bool {
+		for _, s := range l {
+			if s != "" {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case kb.ctrlState && kb.shiftState && rowUsed(kb.CtrlShift):
+		return kb.CtrlShift, kb.CtrlShiftDisabled, "ctrl+shift"
+	case kb.altState && kb.shiftState && rowUsed(kb.AltShift):
+		return kb.AltShift, kb.AltShiftDisabled, "alt+shift"
+	case kb.ctrlState && kb.altState && rowUsed(kb.CtrlAlt):
+		return kb.CtrlAlt, kb.CtrlAltDisabled, "ctrl+alt"
+	case kb.shiftState:
+		return kb.Shift, kb.ShiftDisabled, "shift"
+	case kb.ctrlState:
+		return kb.Ctrl, kb.CtrlDisabled, "ctrl"
+	case kb.altState:
+		return kb.Alt, kb.AltDisabled, "alt"
+	}
+	return kb.Normal, kb.NormalDisabled, "normal"
+}
+
 func (kb *KeyBar) DisplayObject(scr *ScreenBuf) {
 	if !kb.IsVisible() {
 		return
 	}
 
-	labels := kb.Normal
-	disabled := kb.NormalDisabled
-	if kb.shiftState {
-		labels = kb.Shift
-		disabled = kb.ShiftDisabled
-	} else if kb.ctrlState {
-		labels = kb.Ctrl
-		disabled = kb.CtrlDisabled
-	} else if kb.altState {
-		labels = kb.Alt
-		disabled = kb.AltDisabled
-	}
+	labels, disabled, _ := kb.activeRow()
 
 	// Double check: if all labels are empty, maybe we shouldn't show anything?
 	// But in Far, numbers 1..12 are always visible.

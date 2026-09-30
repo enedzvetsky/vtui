@@ -817,18 +817,7 @@ func semanticMenuBar(mb *MenuBar) map[string]any {
 }
 
 func semanticKeyBar(kb *KeyBar) map[string]any {
-	labels := kb.Normal
-	modifier := "normal"
-	if kb.shiftState {
-		labels = kb.Shift
-		modifier = "shift"
-	} else if kb.ctrlState {
-		labels = kb.Ctrl
-		modifier = "ctrl"
-	} else if kb.altState {
-		labels = kb.Alt
-		modifier = "alt"
-	}
+	labels, _, modifier := kb.activeRow()
 	items := make([]map[string]any, 0, len(labels))
 	for i, label := range labels {
 		items = append(items, map[string]any{

@@ -2719,6 +2719,12 @@ func (fm *frameManager) renderPhase() {
 				fm.KeyBar.ShiftDisabled = ks.ShiftDisabled
 				fm.KeyBar.CtrlDisabled = ks.CtrlDisabled
 				fm.KeyBar.AltDisabled = ks.AltDisabled
+				fm.KeyBar.CtrlShift = ks.CtrlShift
+				fm.KeyBar.AltShift = ks.AltShift
+				fm.KeyBar.CtrlAlt = ks.CtrlAlt
+				fm.KeyBar.CtrlShiftDisabled = ks.CtrlShiftDisabled
+				fm.KeyBar.AltShiftDisabled = ks.AltShiftDisabled
+				fm.KeyBar.CtrlAltDisabled = ks.CtrlAltDisabled
 				break
 			}
 		}
