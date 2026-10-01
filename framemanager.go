@@ -2471,6 +2471,11 @@ func (fm *frameManager) Run(readers ...*vtinput.Reader) {
 		fm.running.Store(false)
 		if fm.shutdown.Load() {
 			fm.finishShutdown()
+			// Suspend's writes above flushed the mouse-off announcement to
+			// the terminal; drop whatever it sent before that arrived, plus
+			// anything that raced in behind it, so the shell prompt that
+			// takes the console next starts with an empty input buffer.
+			vtinput.DrainInput()
 		} else if fm.scr != nil {
 			fm.scr.SetCursorVisible(true)
 			// Skip the flush if Suspend already restored the terminal: this

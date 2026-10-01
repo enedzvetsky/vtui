@@ -18,7 +18,7 @@ require (
 	github.com/unxed/keytrans v0.1.35
 	github.com/unxed/kiwi-go v0.1.0
 	github.com/unxed/libwinescape v0.2.1
-	github.com/unxed/vtinput v0.1.9
+	github.com/unxed/vtinput v0.1.10
 	github.com/unxed/winkeys v0.1.1
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/image v0.45.0

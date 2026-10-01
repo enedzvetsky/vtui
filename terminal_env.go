@@ -208,6 +208,20 @@ func Suspend() {
 	termMu.Lock()
 	defer termMu.Unlock()
 	if isPrepared {
+		// Restore the input mode FIRST, before the writes below. On Windows
+		// the console host re-announces the mouse modes to the terminal when
+		// SetConsoleMode changes the mouse-related flags (microsoft/terminal
+		// #9970), and that request reaches the terminal only with the next
+		// write to the console (microsoft/terminal #15711) -- f4's own
+		// leaveHostConsole re-announces before the redraw it ends with for
+		// the same reason. With inputRestore last, the mouse-off announcement
+		// stayed pending once the process exited: the terminal kept sending
+		// mouse reports into a console whose mode the reader had already
+		// handed back, and the prompt echoed them as text.
+		if inputRestore != nil {
+			inputRestore()
+			inputRestore = nil
+		}
 		out := getTermOut()
 		vt := consoleUsesVT()
 		modernVT := vt && !IsFreeBSDConsole
@@ -250,10 +264,6 @@ func Suspend() {
 		// or re-attach, leaving the session with default colors.
 		if FrameManager != nil && FrameManager.scr != nil {
 			FrameManager.scr.InvalidateHostPalette()
-		}
-		if inputRestore != nil {
-			inputRestore()
-			inputRestore = nil
 		}
 		isPrepared = false
 	}
