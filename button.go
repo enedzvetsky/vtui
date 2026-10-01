@@ -95,6 +95,11 @@ func (b *Button) DisplayObject(scr *ScreenBuf) {
 		labelHotkeyPos -= 2
 	}
 
+	if roundedButtonsActive() {
+		b.drawRoundedButton(scr, label, labelHotkeyPos, n, h)
+		return
+	}
+
 	p := NewPainter(scr)
 	p.DrawButtonEar(b.X1, b.Y1, SymButtonEarLeft, n)
 	p.DrawHighlightedText(b.X1+2, b.Y1, label, labelHotkeyPos, n, h)
