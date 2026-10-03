@@ -2443,6 +2443,15 @@ func (fm *frameManager) Run(readers ...*vtinput.Reader) {
 
 	if len(readers) > 0 && readers[0] != nil {
 		fm.Reader = readers[0]
+		// Nothing has read stdin yet -- the pump starts with GetEventChan
+		// below -- so everything the console accumulated while the
+		// application was starting up is still in the input buffer: mouse
+		// reports the terminal kept sending (it was told about the mouse
+		// by the previous occupant of the console) plus native mouse
+		// records from this application's own init. Drop it all: it was
+		// aimed at a reader that did not exist yet, and the panel would
+		// otherwise show it as typed text or act on phantom clicks.
+		vtinput.DrainInput()
 		fm.EventChan = readers[0].GetEventChan()
 		defer readers[0].Close()
 	}
