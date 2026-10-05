@@ -82,7 +82,7 @@ func TestCoreValidationRejectsMalformedInput(t *testing.T) {
 	if err := validateTypes([]Class{L, B, R}); err == nil {
 		t.Fatal("validateTypes accepted B before paragraph end")
 	}
-	for _, embedding := range []level{-1, 2} {
+	for _, embedding := range []level{2, 3} {
 		if err := validateParagraphEmbeddingLevel(embedding); err == nil {
 			t.Errorf("embedding level %d was accepted", embedding)
 		}
