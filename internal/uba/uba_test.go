@@ -74,3 +74,38 @@ func TestLevels_BracketPairs(t *testing.T) {
 		}
 	}
 }
+
+func TestCoreValidationRejectsMalformedInput(t *testing.T) {
+	if err := validateTypes(nil); err == nil {
+		t.Fatal("validateTypes accepted empty input")
+	}
+	if err := validateTypes([]Class{L, B, R}); err == nil {
+		t.Fatal("validateTypes accepted B before paragraph end")
+	}
+	for _, embedding := range []level{-1, 2} {
+		if err := validateParagraphEmbeddingLevel(embedding); err == nil {
+			t.Errorf("embedding level %d was accepted", embedding)
+		}
+	}
+	if err := validateLineBreaks([]int{2, 2}, 2); err == nil {
+		t.Fatal("validateLineBreaks accepted duplicate break")
+	}
+	if err := validateLineBreaks([]int{1}, 2); err == nil {
+		t.Fatal("validateLineBreaks accepted incomplete breaks")
+	}
+	if err := validatePbTypes(nil); err == nil {
+		t.Fatal("validatePbTypes accepted empty input")
+	}
+	if err := validatePbTypes([]bracketType{bpNone, bracketType(99)}); err == nil {
+		t.Fatal("validatePbTypes accepted unknown pair type")
+	}
+	if err := validatePbValues(nil, []bracketType{bpNone}); err == nil {
+		t.Fatal("validatePbValues accepted nil values")
+	}
+	if err := validatePbValues([]rune{'('}, nil); err == nil {
+		t.Fatal("validatePbValues accepted mismatched lengths")
+	}
+	if !Class(L).in(L, R) || Class(L).in(R) {
+		t.Fatal("Class.in returned an incorrect membership result")
+	}
+}
