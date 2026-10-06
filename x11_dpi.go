@@ -11,6 +11,7 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
+	"github.com/unxed/vtinput"
 )
 
 // Live DPI tracking for the X11 backend.
@@ -117,9 +118,51 @@ func x11FontDPI(dpi float64) (fontDPI float64, scale int) {
 	return 72.0 * factor, scale
 }
 
+// x11DPIConn is the part of the X protocol the DPI watch uses. The real one
+// is an xgb connection; tests give a fake, since no display is at hand.
+type x11DPIConn interface {
+	internAtom(name string) xproto.Atom
+	selectionOwner(selection xproto.Atom) xproto.Window
+	// property returns a format-8 property's bytes, nil when it is absent.
+	property(win xproto.Window, prop xproto.Atom) []byte
+	selectEvents(win xproto.Window, mask uint32)
+}
+
+// xgbDPIConn is x11DPIConn over a live connection.
+type xgbDPIConn struct{ conn *xgb.Conn }
+
+func (c xgbDPIConn) internAtom(name string) xproto.Atom {
+	reply, err := xproto.InternAtom(c.conn, false, uint16(len(name)), name).Reply()
+	if err != nil || reply == nil {
+		return 0
+	}
+	return reply.Atom
+}
+
+func (c xgbDPIConn) selectionOwner(selection xproto.Atom) xproto.Window {
+	reply, err := xproto.GetSelectionOwner(c.conn, selection).Reply()
+	if err != nil || reply == nil {
+		return 0
+	}
+	return reply.Owner
+}
+
+func (c xgbDPIConn) property(win xproto.Window, prop xproto.Atom) []byte {
+	reply, err := xproto.GetProperty(c.conn, false, win, prop, xproto.AtomAny, 0, 1<<20).Reply()
+	if err != nil || reply == nil || reply.Format != 8 {
+		return nil
+	}
+	return reply.Value
+}
+
+func (c xgbDPIConn) selectEvents(win xproto.Window, mask uint32) {
+	xproto.ChangeWindowAttributes(c.conn, win, xproto.CwEventMask, []uint32{mask})
+}
+
 // x11DPIWatch is what the host needs to notice a DPI change: the atoms and
 // windows whose properties carry the DPI.
 type x11DPIWatch struct {
+	conn            x11DPIConn
 	root            xproto.Window
 	resourceManager xproto.Atom
 	manager         xproto.Atom
@@ -130,68 +173,58 @@ type x11DPIWatch struct {
 	xsettingsOwner xproto.Window
 }
 
-func x11InternAtom(conn *xgb.Conn, name string) xproto.Atom {
-	reply, err := xproto.InternAtom(conn, false, uint16(len(name)), name).Reply()
-	if err != nil || reply == nil {
-		return 0
-	}
-	return reply.Atom
-}
+// x11DPIEventMask is what the watch selects on the root and on the XSETTINGS
+// manager window: property changes, and the structure events that carry the
+// MANAGER announcement of a new XSETTINGS manager.
+const x11DPIEventMask = uint32(xproto.EventMaskPropertyChange | xproto.EventMaskStructureNotify)
 
 // newX11DPIWatch interns the atoms and finds the XSETTINGS manager of the
 // given screen.
-func newX11DPIWatch(conn *xgb.Conn, root xproto.Window, screenNum int) *x11DPIWatch {
+func newX11DPIWatch(conn x11DPIConn, root xproto.Window, screenNum int) *x11DPIWatch {
 	w := &x11DPIWatch{
+		conn:            conn,
 		root:            root,
-		resourceManager: x11InternAtom(conn, "RESOURCE_MANAGER"),
-		manager:         x11InternAtom(conn, "MANAGER"),
-		xsettingsSel:    x11InternAtom(conn, fmt.Sprintf("_XSETTINGS_S%d", screenNum)),
-		xsettingsProp:   x11InternAtom(conn, "_XSETTINGS_SETTINGS"),
+		resourceManager: conn.internAtom("RESOURCE_MANAGER"),
+		manager:         conn.internAtom("MANAGER"),
+		xsettingsSel:    conn.internAtom(fmt.Sprintf("_XSETTINGS_S%d", screenNum)),
+		xsettingsProp:   conn.internAtom("_XSETTINGS_SETTINGS"),
 	}
-	w.findXSettingsOwner(conn)
+	w.findXSettingsOwner()
 	return w
 }
 
 // findXSettingsOwner looks up the XSETTINGS manager window and subscribes to
 // changes of its properties.
-func (w *x11DPIWatch) findXSettingsOwner(conn *xgb.Conn) {
+func (w *x11DPIWatch) findXSettingsOwner() {
 	w.xsettingsOwner = 0
 	if w.xsettingsSel == 0 {
 		return
 	}
-	reply, err := xproto.GetSelectionOwner(conn, w.xsettingsSel).Reply()
-	if err != nil || reply == nil || reply.Owner == 0 {
+	owner := w.conn.selectionOwner(w.xsettingsSel)
+	if owner == 0 {
 		return
 	}
-	w.xsettingsOwner = reply.Owner
-	xproto.ChangeWindowAttributes(conn, w.xsettingsOwner, xproto.CwEventMask,
-		[]uint32{uint32(xproto.EventMaskPropertyChange | xproto.EventMaskStructureNotify)})
+	w.xsettingsOwner = owner
+	w.conn.selectEvents(owner, x11DPIEventMask)
 }
 
 // subscribe asks for the root window property changes that carry Xft.dpi
 // and for the MANAGER announcement of a new XSETTINGS manager.
-func (w *x11DPIWatch) subscribe(conn *xgb.Conn) {
-	xproto.ChangeWindowAttributes(conn, w.root, xproto.CwEventMask,
-		[]uint32{uint32(xproto.EventMaskPropertyChange | xproto.EventMaskStructureNotify)})
+func (w *x11DPIWatch) subscribe() {
+	w.conn.selectEvents(w.root, x11DPIEventMask)
 }
 
 // readDPI returns the desktop DPI: XSETTINGS first, the Xft.dpi resource
 // next, 96 when neither says.
-func (w *x11DPIWatch) readDPI(conn *xgb.Conn) float64 {
+func (w *x11DPIWatch) readDPI() float64 {
 	if w.xsettingsOwner != 0 && w.xsettingsProp != 0 {
-		reply, err := xproto.GetProperty(conn, false, w.xsettingsOwner, w.xsettingsProp, xproto.AtomAny, 0, 1<<20).Reply()
-		if err == nil && reply != nil && reply.Format == 8 {
-			if dpi := parseXSettingsDPI(reply.Value); dpi > 0 {
-				return dpi
-			}
+		if dpi := parseXSettingsDPI(w.conn.property(w.xsettingsOwner, w.xsettingsProp)); dpi > 0 {
+			return dpi
 		}
 	}
 	if w.resourceManager != 0 {
-		reply, err := xproto.GetProperty(conn, false, w.root, w.resourceManager, xproto.AtomAny, 0, 1<<20).Reply()
-		if err == nil && reply != nil && reply.Format == 8 {
-			if dpi := parseXftDPI(string(reply.Value)); dpi > 0 {
-				return dpi
-			}
+		if dpi := parseXftDPI(string(w.conn.property(w.root, w.resourceManager))); dpi > 0 {
+			return dpi
 		}
 	}
 	return x11DefaultDPI
@@ -234,13 +267,40 @@ func (h *X11Host) refreshDPI() {
 	if h.dpiWatch == nil {
 		return
 	}
-	dpi := h.dpiWatch.readDPI(h.conn)
+	dpi := h.dpiWatch.readDPI()
 	h.mu.Lock()
 	changed := h.applyDPILocked(dpi)
 	h.mu.Unlock()
 	if changed {
 		h.resizeToGrid()
 	}
+}
+
+// handleDPIEvent handles the events the DPI watch subscribed to: a change of
+// a property that carries the DPI, and the MANAGER announcement of a new
+// XSETTINGS manager. It reports whether the event was one of them, so the
+// event loop can skip its own handling. Runs on the event loop goroutine.
+func (h *X11Host) handleDPIEvent(ev xgb.Event) bool {
+	w := h.dpiWatch
+	if w == nil {
+		return false
+	}
+	switch e := ev.(type) {
+	case xproto.PropertyNotifyEvent:
+		if !w.isDPIProperty(e.Window, e.Atom) {
+			return false
+		}
+		h.refreshDPI()
+		return true
+	case xproto.ClientMessageEvent:
+		if !w.isNewXSettingsManager(&e) {
+			return false
+		}
+		w.findXSettingsOwner()
+		h.refreshDPI()
+		return true
+	}
+	return false
 }
 
 // resizeToGrid asks the X server for a window that holds the current grid
@@ -291,4 +351,16 @@ func (h *X11Host) handleConfigure(w, ht uint16) bool {
 		h.cols, h.rows = int(w)/h.cellW, int(ht)/h.cellH
 	}
 	return true
+}
+
+// onConfigureNotify handles a ConfigureNotify from the event loop. The root
+// window, watched for DPI changes, reports its own configures (a RandR
+// screen resize, say); only the host's window resizes the grid.
+func (h *X11Host) onConfigureNotify(e xproto.ConfigureNotifyEvent) {
+	if e.Window != h.wid {
+		return
+	}
+	if h.handleConfigure(e.Width, e.Height) {
+		h.sendEvent(&vtinput.InputEvent{Type: vtinput.ResizeEventType})
+	}
 }

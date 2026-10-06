@@ -300,6 +300,9 @@ func (h *X11Host) RunEventLoop() {
 		if ev == nil {
 			break
 		}
+		if h.handleDPIEvent(ev) {
+			continue
+		}
 
 		switch e := ev.(type) {
 		case xproto.ExposeEvent:
@@ -311,19 +314,7 @@ func (h *X11Host) RunEventLoop() {
 			h.flushImage()
 
 		case xproto.ConfigureNotifyEvent:
-			// The root window (watched for DPI changes) reports its own
-			// configures, e.g. a RandR screen resize; only ours resize the grid.
-			if e.Window != h.wid {
-				continue
-			}
-			if h.handleConfigure(e.Width, e.Height) {
-				h.sendEvent(&vtinput.InputEvent{Type: vtinput.ResizeEventType})
-			}
-
-		case xproto.PropertyNotifyEvent:
-			if h.dpiWatch != nil && h.dpiWatch.isDPIProperty(e.Window, e.Atom) {
-				h.refreshDPI()
-			}
+			h.onConfigureNotify(e)
 
 		case xproto.FocusInEvent:
 			h.handleFocusEvent(true)
@@ -377,11 +368,6 @@ func (h *X11Host) RunEventLoop() {
 			})
 
 		case xproto.ClientMessageEvent:
-			if h.dpiWatch != nil && h.dpiWatch.isNewXSettingsManager(&e) {
-				h.dpiWatch.findXSettingsOwner(h.conn)
-				h.refreshDPI()
-				continue
-			}
 			if h.dnd != nil && h.dnd.handleClientMessage(&e) {
 				continue
 			}
@@ -824,7 +810,7 @@ func runInX11Window(cols, rows int, fontName string, fontSize float64, setupApp 
 	desktopDPI := x11DefaultDPI
 	if tempConn, _ := xgb.NewConn(); tempConn != nil {
 		root := xproto.Setup(tempConn).DefaultScreen(tempConn).Root
-		desktopDPI = newX11DPIWatch(tempConn, root, tempConn.DefaultScreen).readDPI(tempConn)
+		desktopDPI = newX11DPIWatch(xgbDPIConn{tempConn}, root, tempConn.DefaultScreen).readDPI()
 		tempConn.Close()
 	}
 	dpi, lineScale := x11FontDPI(desktopDPI)
@@ -840,8 +826,8 @@ func runInX11Window(cols, rows int, fontName string, fontSize float64, setupApp 
 	host.fontSize = fontSize
 	host.dpi = dpi
 	host.scale = lineScale
-	host.dpiWatch = newX11DPIWatch(host.conn, host.screen.Root, host.conn.DefaultScreen)
-	host.dpiWatch.subscribe(host.conn)
+	host.dpiWatch = newX11DPIWatch(xgbDPIConn{host.conn}, host.screen.Root, host.conn.DefaultScreen)
+	host.dpiWatch.subscribe()
 
 	renderer := NewX11Renderer(host, face)
 	host.renderer = renderer
