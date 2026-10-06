@@ -33,7 +33,7 @@ func (c *fakeDPIConn) internAtom(name string) xproto.Atom {
 	if a, ok := c.atoms[name]; ok {
 		return a
 	}
-	a := xproto.Atom(100 + len(c.atoms))
+	a := xproto.Atom(100 + len(c.atoms)) // #nosec G115 -- test fake: a few atoms
 	c.atoms[name] = a
 	return a
 }
@@ -130,7 +130,7 @@ func newX11DPITestHost(t *testing.T, conn *fakeDPIConn) *X11Host {
 	_, cellW, cellH := loadBestFont("", 16, 72)
 	host := &X11Host{cols: 10, rows: 5, cellW: cellW, cellH: cellH, scale: 1,
 		fontSize: 16, dpi: 72, scr: scr, wid: 7,
-		width: uint16(10 * cellW), height: uint16(5 * cellH)}
+		width: uint16(10 * cellW), height: uint16(5 * cellH)} // #nosec G115 -- test fixture: a 10x5 grid of font-sized cells
 	host.renderer = NewX11Renderer(host, nil)
 	host.dpiWatch = newX11DPIWatch(conn, fakeRoot, 0)
 	return host

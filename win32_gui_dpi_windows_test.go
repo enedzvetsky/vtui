@@ -92,7 +92,7 @@ func TestWin32GuiHost_ApplyDPIRescalesAndKeepsGrid(t *testing.T) {
 	t.Logf("cell %dx%d at 100%% -> %dx%d at 200%%", oldW, oldH, host.cellW, host.cellH)
 	// With a real font installed the cells must grow; the built-in bitmap
 	// fallback (7x13) has a single size and cannot.
-	if !(oldW == 7 && oldH == 13) && (host.cellW <= oldW || host.cellH <= oldH) {
+	if (oldW != 7 || oldH != 13) && (host.cellW <= oldW || host.cellH <= oldH) {
 		t.Errorf("cells did not grow at 200%%: %dx%d -> %dx%d", oldW, oldH, host.cellW, host.cellH)
 	}
 }

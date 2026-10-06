@@ -82,8 +82,10 @@ func parseXSettingsDPI(data []byte) float64 {
 				return 0
 			}
 			if name == "Xft/DPI" {
-				v := int32(order.Uint32(data[pos : pos+4]))
-				if v <= 0 {
+				// A signed value: -1 (0xFFFFFFFF) and anything above
+				// MaxInt32 mean "not set", not a huge DPI.
+				v := order.Uint32(data[pos : pos+4])
+				if v == 0 || v > math.MaxInt32 {
 					return 0
 				}
 				return float64(v) / 1024
@@ -132,7 +134,11 @@ type x11DPIConn interface {
 type xgbDPIConn struct{ conn *xgb.Conn }
 
 func (c xgbDPIConn) internAtom(name string) xproto.Atom {
-	reply, err := xproto.InternAtom(c.conn, false, uint16(len(name)), name).Reply()
+	n := len(name)
+	if n > math.MaxUint16 {
+		return 0
+	}
+	reply, err := xproto.InternAtom(c.conn, false, uint16(n), name).Reply()
 	if err != nil || reply == nil {
 		return 0
 	}

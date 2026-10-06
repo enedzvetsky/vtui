@@ -360,8 +360,8 @@ func (h *X11Host) RunEventLoop() {
 			cellW, cellH := h.cellSize()
 			h.sendEvent(&vtinput.InputEvent{
 				Type:            vtinput.MouseEventType,
-				MouseX:          int16(int(e.EventX) / cellW),
-				MouseY:          int16(int(e.EventY) / cellH),
+				MouseX:          pixelToCell(int(e.EventX), cellW),
+				MouseY:          pixelToCell(int(e.EventY), cellH),
 				MouseEventFlags: vtinput.MouseMoved,
 				ButtonState:     btn,
 				ControlKeyState: h.translateModifiers(e.State),
@@ -550,8 +550,8 @@ func (h *X11Host) handleButtonEvent(x, y int16, detail xproto.Button, state uint
 
 	event := &vtinput.InputEvent{
 		Type:            vtinput.MouseEventType,
-		MouseX:          int16(int(x) / cellW),
-		MouseY:          int16(int(y) / cellH),
+		MouseX:          pixelToCell(int(x), cellW),
+		MouseY:          pixelToCell(int(y), cellH),
 		KeyDown:         isDown,
 		ButtonState:     currMouseBtn,
 		ControlKeyState: h.translateModifiers(state),

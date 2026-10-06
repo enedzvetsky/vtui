@@ -777,8 +777,8 @@ func (h *Win32GuiHost) handleMessage(hwnd syscall.Handle, msg uint32, wParam, lP
 		x := int16(int32(int16(lParam & 0xFFFF)))
 		y := int16(int32(int16(lParam >> 16)))
 		cellW, cellH := h.cellSize()
-		cellX := int16(int(x) / cellW)
-		cellY := int16(int(y) / cellH)
+		cellX := pixelToCell(int(x), cellW)
+		cellY := pixelToCell(int(y), cellH)
 		var btn uint32
 		switch msg {
 		case wmLButtonDown:
@@ -806,8 +806,8 @@ func (h *Win32GuiHost) handleMessage(hwnd syscall.Handle, msg uint32, wParam, lP
 		x := int16(int32(int16(lParam & 0xFFFF)))
 		y := int16(int32(int16((lParam >> 16) & 0xFFFF)))
 		cellW, cellH := h.cellSize()
-		cellX := int16(int(x) / cellW)
-		cellY := int16(int(y) / cellH)
+		cellX := pixelToCell(int(x), cellW)
+		cellY := pixelToCell(int(y), cellH)
 		var btn uint32
 		switch msg {
 		case wmLButtonUp:
@@ -838,8 +838,8 @@ func (h *Win32GuiHost) handleMessage(hwnd syscall.Handle, msg uint32, wParam, lP
 		x := int16(int32(int16(lParam & 0xFFFF)))
 		y := int16(int32(int16((lParam >> 16) & 0xFFFF)))
 		cellW, cellH := h.cellSize()
-		cellX := int16(int(x) / cellW)
-		cellY := int16(int(y) / cellH)
+		cellX := pixelToCell(int(x), cellW)
+		cellY := pixelToCell(int(y), cellH)
 		var btn uint32
 		switch msg {
 		case wmLButtonDblClk:
@@ -868,8 +868,8 @@ func (h *Win32GuiHost) handleMessage(hwnd syscall.Handle, msg uint32, wParam, lP
 		x := int16(int32(int16(lParam & 0xFFFF)))
 		y := int16(int32(int16((lParam >> 16) & 0xFFFF)))
 		cellW, cellH := h.cellSize()
-		cellX := int16(int(x) / cellW)
-		cellY := int16(int(y) / cellH)
+		cellX := pixelToCell(int(x), cellW)
+		cellY := pixelToCell(int(y), cellH)
 		h.mu.Lock()
 		btn := h.mouseBtn
 		moved := !h.mouseCellKnown || cellX != h.lastMouseCellX || cellY != h.lastMouseCellY
@@ -913,8 +913,8 @@ func (h *Win32GuiHost) handleMessage(hwnd syscall.Handle, msg uint32, wParam, lP
 		pt.y = int32(int16((lParam >> 16) & 0xFFFF))
 		procScreenToClient.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pt)))
 		cellW, cellH := h.cellSize()
-		cellX := int16(int(pt.x) / cellW)
-		cellY := int16(int(pt.y) / cellH)
+		cellX := pixelToCell(int(pt.x), cellW)
+		cellY := pixelToCell(int(pt.y), cellH)
 		h.sendEvent(&vtinput.InputEvent{
 			Type:            vtinput.MouseEventType,
 			MouseX:          cellX,

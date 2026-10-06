@@ -126,7 +126,7 @@ func adjustWindowRectForDPI(rc *win32Rect, dpi float64) {
 			return
 		}
 	}
-	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(rc)), style, 0, exStyle)
+	_, _, _ = procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(rc)), style, 0, exStyle)
 }
 
 // setScale changes the line-thickness scale of the renderer (underlines, box
@@ -170,7 +170,7 @@ func (h *Win32GuiHost) applyDPILocked(dpi float64) bool {
 // gridWindowRect is the outer window rectangle that holds cols x rows cells
 // at the given DPI, placed at (x, y).
 func gridWindowRect(x, y int32, cols, rows, cellW, cellH int, dpi float64) win32Rect {
-	rc := win32Rect{right: int32(cols * cellW), bottom: int32(rows * cellH)}
+	rc := win32Rect{right: win32Extent(cols, cellW), bottom: win32Extent(rows, cellH)}
 	adjustWindowRectForDPI(&rc, dpi)
 	return win32Rect{left: x, top: y, right: x + rc.right - rc.left, bottom: y + rc.bottom - rc.top}
 }
@@ -194,16 +194,16 @@ func (h *Win32GuiHost) handleDPIChange(hwnd syscall.Handle, dpi float64, suggest
 			// handed us that rectangle, and the grid follows it in WM_SIZE.
 			rc = *suggested
 		}
-		procSetWindowPos.Call(uintptr(hwnd), 0,
-			uintptr(rc.left), uintptr(rc.top),
-			uintptr(rc.right-rc.left), uintptr(rc.bottom-rc.top), flags)
+		_, _, _ = procSetWindowPos.Call(uintptr(hwnd), 0,
+			win32IntArg(rc.left), win32IntArg(rc.top),
+			win32IntArg(rc.right-rc.left), win32IntArg(rc.bottom-rc.top), flags)
 	}
 	if changed && FrameManager != nil {
 		// When the grid is unchanged, WM_SIZE sends no resize event, so
 		// nothing else would repaint the cells at the new size.
 		FrameManager.HardRefresh()
 	}
-	procInvalidateRect.Call(uintptr(hwnd), 0, 0)
+	_, _, _ = procInvalidateRect.Call(uintptr(hwnd), 0, 0)
 }
 
 // syncWindowDPI measures the window against the monitor it actually opened
@@ -220,21 +220,9 @@ func (h *Win32GuiHost) syncWindowDPI(hwnd syscall.Handle) {
 		return
 	}
 	rc := gridWindowRect(0, 0, cols, rows, cellW, cellH, dpi)
-	procSetWindowPos.Call(uintptr(hwnd), 0, 0, 0,
-		uintptr(rc.right-rc.left), uintptr(rc.bottom-rc.top),
+	_, _, _ = procSetWindowPos.Call(uintptr(hwnd), 0, 0, 0,
+		win32IntArg(rc.right-rc.left), win32IntArg(rc.bottom-rc.top),
 		swpNoMove|swpNoZOrder|swpNoActivate)
-}
-
-// windowDPI is the DPI of the monitor the host's window is on, or the
-// primary monitor's before the window exists.
-func (h *Win32GuiHost) windowDPI() float64 {
-	h.mu.Lock()
-	hwnd := h.hwnd
-	h.mu.Unlock()
-	if hwnd == 0 {
-		return primaryMonitorDPI()
-	}
-	return win32WindowDPI(hwnd)
 }
 
 // cellSize returns the current cell size under the lock: a DPI change or a
@@ -243,4 +231,25 @@ func (h *Win32GuiHost) cellSize() (int, int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.cellW, h.cellH
+}
+
+// win32Extent is the pixel extent of n cells of the given size, as the
+// int32 a RECT holds, clamped rather than wrapped.
+func win32Extent(n, cell int) int32 {
+	v := n * cell
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < 0 {
+		return 0
+	}
+	return int32(v)
+}
+
+// win32IntArg passes a signed int32 (a window coordinate, which is negative
+// on a monitor left of or above the primary one) as a Win32 int argument.
+func win32IntArg(v int32) uintptr {
+	// #nosec G115 -- deliberate: the callee reads the low 32 bits as a
+	// signed int, so the two's-complement bit pattern is what must arrive.
+	return uintptr(uint32(v))
 }

@@ -54,17 +54,17 @@ func xsettingsBlob(order binary.AppendByteOrder, entries []xsettingsEntry) []byt
 		b[0] = 1
 	}
 	b = order.AppendUint32(b, 7) // serial
-	b = order.AppendUint32(b, uint32(len(entries)))
+	b = order.AppendUint32(b, uint32(len(entries))) // #nosec G115 -- test fixture: a handful of entries
 	for _, e := range entries {
 		b = append(b, e.typ, 0)
-		b = order.AppendUint16(b, uint16(len(e.name)))
+		b = order.AppendUint16(b, uint16(len(e.name))) // #nosec G115 -- test fixture: short setting names
 		b = pad(append(b, e.name...))
 		b = order.AppendUint32(b, 1) // last-change serial
 		switch e.typ {
 		case xsettingsTypeInteger:
-			b = order.AppendUint32(b, uint32(e.ival))
+			b = order.AppendUint32(b, uint32(e.ival)) // #nosec G115 -- deliberate: XSETTINGS stores the signed value as its bit pattern
 		case xsettingsTypeString:
-			b = order.AppendUint32(b, uint32(len(e.sval)))
+			b = order.AppendUint32(b, uint32(len(e.sval))) // #nosec G115 -- test fixture: short string values
 			b = pad(append(b, e.sval...))
 		case xsettingsTypeColor:
 			for _, c := range e.color {
