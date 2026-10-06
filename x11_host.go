@@ -62,6 +62,12 @@ type X11Host struct {
 	// dpiWatch tracks the properties that carry the desktop DPI; nil when
 	// the window was built without a connection (unit tests).
 	dpiWatch *x11DPIWatch
+	// gridStale says the cell size changed (DPI change, font hot-swap) since
+	// cols x rows were last derived from the window size. The next
+	// ConfigureNotify re-derives them even when the pixel size is unchanged:
+	// a maximized or tiled window cannot follow the grid, so the grid has to
+	// follow the window.
+	gridStale bool
 
 	translator     keytrans.Translator
 	mouseBtn       uint32
@@ -773,6 +779,7 @@ func (h *X11Host) applyFontLocked(fontName string, fontSize float64) {
 	h.fontSize = fontSize
 	h.cellW = cellW
 	h.cellH = cellH
+	h.gridStale = true
 	if h.renderer != nil {
 		h.renderer.setFace(face)
 	}

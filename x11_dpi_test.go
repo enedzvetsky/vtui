@@ -226,3 +226,37 @@ func TestX11DPIWatch_Matching(t *testing.T) {
 		t.Error("a watch without atoms matched a property")
 	}
 }
+
+// A maximized or tiled window cannot be resized to keep the grid: the
+// window manager answers the grid-sized ConfigureWindow with the size it
+// keeps. The grid must then follow the window, although its pixel size did
+// not change, or at 200% only a quarter of the UI would show.
+func TestX11Host_RefusedResizeAfterRescaleRefitsGrid(t *testing.T) {
+	scr := NewSilentScreenBuf()
+	scr.AllocBuf(10, 5)
+	host := &X11Host{cols: 10, rows: 5, cellW: 9, cellH: 17, width: 90, height: 85,
+		fontSize: 16, dpi: 72, scr: scr}
+	host.renderer = NewX11Renderer(host, nil)
+
+	host.mu.Lock()
+	host.applyDPILocked(192)
+	cellW, cellH := host.cellW, host.cellH
+	host.mu.Unlock()
+	if !host.gridStale {
+		t.Fatal("a font reload did not mark the grid stale")
+	}
+
+	// The WM keeps the window at 90x85.
+	if !host.handleConfigure(90, 85) {
+		t.Fatal("a refused resize after a rescale did not refit the grid")
+	}
+	if wantCols, wantRows := 90/cellW, 85/cellH; host.cols != wantCols || host.rows != wantRows {
+		t.Fatalf("grid = %dx%d, want %dx%d (window 90x85 at %dx%d cells)", host.cols, host.rows, wantCols, wantRows, cellW, cellH)
+	}
+	if host.gridStale {
+		t.Error("the grid stayed stale after being refitted")
+	}
+	if host.handleConfigure(90, 85) {
+		t.Error("a second same-size configure was reported as a change")
+	}
+}

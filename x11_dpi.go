@@ -272,13 +272,20 @@ func (h *X11Host) cellSize() (int, int) {
 }
 
 // handleConfigure applies a ConfigureNotify of the host's window: the grid
-// follows the new pixel size. It reports whether the grid size changed.
+// follows the new pixel size. It reports whether a resize event is due.
+//
+// After the cell size changed (gridStale), the grid is re-derived even when
+// the pixel size is the same. resizeToGrid asks for a window that keeps the
+// grid, but a maximized, tiled or fullscreen window is refused that size; the
+// window manager then answers with a ConfigureNotify of the size it keeps
+// (ICCCM 4.1.5), and the grid must shrink or grow to fit it.
 func (h *X11Host) handleConfigure(w, ht uint16) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if w == h.width && ht == h.height {
+	if w == h.width && ht == h.height && !h.gridStale {
 		return false
 	}
+	h.gridStale = false
 	h.width, h.height = w, ht
 	if h.cellW > 0 && h.cellH > 0 {
 		h.cols, h.rows = int(w)/h.cellW, int(ht)/h.cellH
