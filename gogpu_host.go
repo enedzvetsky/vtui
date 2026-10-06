@@ -574,9 +574,8 @@ func (h *GogpuHost) SetFont(fontName string, fontSize float64) {
 // another scale, or the display's scale or resolution changed.
 //
 // gogpu lays the window out in logical pixels and ggcanvas follows the device
-// scale on its own, so the cell size and the grid stay as they are. What does
-// not follow is everything vtui rasterised at the old scale, which the caller
-// drops. Every change is logged, with both sizes: on macOS the backing scale
+// scale on its own, so the cell size and the grid stay as they are; the
+// caller only forces a full repaint at the new scale. Every change is logged, with both sizes: on macOS the backing scale
 // is the one thing this backend cannot observe directly, so the log is what
 // tells a wrong scale from gogpu apart from a wrong one in vtui.
 func (h *GogpuHost) noteScale(scale float64, w, ht, fbW, fbH int) bool {
@@ -881,9 +880,6 @@ func RunGogpuHost(cols, rows int, fontName string, fontSize float64, setupApp fu
 		host.mu.Unlock()
 
 		if host.noteScale(dc.ScaleFactor(), w, h, dc.FramebufferWidth(), dc.FramebufferHeight()) {
-			if r, ok := host.scr.Renderer.(*GogpuRenderer); ok {
-				r.dropScaledCaches()
-			}
 			if FrameManager != nil {
 				FrameManager.HardRefresh()
 			}

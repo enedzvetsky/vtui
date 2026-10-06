@@ -115,17 +115,6 @@ func (r *GogpuRenderer) setFace(face text.Face, chain *fontFallbackChain, cellW,
 	r.gfxKnown = false
 }
 
-// dropScaledCaches forgets what was rasterised for the previous device scale
-// -- the glyph runs memoised by glyphRectsCached and the native image
-// placements -- after the window moved to a display with another scale (see
-// GogpuHost.noteScale). The font and the cell size stay: they are logical.
-func (r *GogpuRenderer) dropScaledCaches() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.glyphMemo = nil
-	r.gfxKnown = false
-}
-
 // SetFont changes the font of the already-open window without recreating
 // it: see GogpuHost.SetFont. It always reports true when there is a host to
 // forward to -- gogpu and ebiten are, as of this part, the GUI backends
